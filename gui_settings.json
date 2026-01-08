@@ -30,5 +30,11 @@
   "script_trader": "pt_trader.py",
   "auto_start_scripts": false,
   "use_kucoin_api": false,
+  "exchange_binance_enabled": false,
+  "exchange_kraken_enabled": false,
+  "exchange_coinbase_enabled": false,
+  "exchange_bybit_enabled": false,
+  "exchange_robinhood_enabled": false,
+  "exchange_kucoin_enabled": false,
   "use_robinhood_api": true
 }
