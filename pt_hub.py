@@ -6221,12 +6221,61 @@ class PowerTraderHub(tk.Tk):
         # API Options - Additional Exchange Platforms
         ttk.Label(frm, text="API Options:", font=("Arial", 10, "bold")).grid(row=r, column=0, sticky="w", pady=(8, 4)); r += 1
         
+        # Helper functions for clearing credential files
+        def _clear_binance_files():
+            try:
+                binance_key_path = Path(self.project_dir) / "binance_key.txt"
+                binance_secret_path = Path(self.project_dir) / "binance_secret.txt"
+                if binance_key_path.exists():
+                    binance_key_path.unlink()
+                if binance_secret_path.exists():
+                    binance_secret_path.unlink()
+                messagebox.showinfo("Success", "Binance credential files cleared.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not clear Binance files: {e}")
+        
+        def _clear_kraken_files():
+            try:
+                kraken_key_path = Path(self.project_dir) / "kraken_key.txt"
+                kraken_secret_path = Path(self.project_dir) / "kraken_secret.txt"
+                if kraken_key_path.exists():
+                    kraken_key_path.unlink()
+                if kraken_secret_path.exists():
+                    kraken_secret_path.unlink()
+                messagebox.showinfo("Success", "Kraken credential files cleared.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not clear Kraken files: {e}")
+        
+        def _clear_coinbase_files():
+            try:
+                coinbase_key_path = Path(self.project_dir) / "coinbase_key.txt"
+                coinbase_secret_path = Path(self.project_dir) / "coinbase_secret.txt"
+                if coinbase_key_path.exists():
+                    coinbase_key_path.unlink()
+                if coinbase_secret_path.exists():
+                    coinbase_secret_path.unlink()
+                messagebox.showinfo("Success", "Coinbase credential files cleared.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not clear Coinbase files: {e}")
+        
+        def _clear_bybit_files():
+            try:
+                bybit_key_path = Path(self.project_dir) / "bybit_key.txt"
+                bybit_secret_path = Path(self.project_dir) / "bybit_secret.txt"
+                if bybit_key_path.exists():
+                    bybit_key_path.unlink()
+                if bybit_secret_path.exists():
+                    bybit_secret_path.unlink()
+                messagebox.showinfo("Success", "Bybit credential files cleared.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not clear Bybit files: {e}")
+        
         # Binance API row
         ttk.Label(frm, text="Binance API:").grid(row=r, column=0, sticky="w", padx=(0, 10), pady=6)
         
         binance_row = ttk.Frame(frm)
         binance_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
-        binance_row.columnconfigure(0, weight=1)
+        binance_row.columnconfigure(2, weight=1)
         
         binance_checkbox = ttk.Checkbutton(binance_row, variable=binance_enabled_var)
         binance_checkbox.grid(row=0, column=0, sticky="w")
@@ -6234,6 +6283,10 @@ class PowerTraderHub(tk.Tk):
         binance_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
         binance_label = ttk.Label(binance_row, text="Spot & Futures", foreground=DARK_MUTED)
         binance_label.grid(row=0, column=2, sticky="w")
+        binance_open_btn = ttk.Button(binance_row, text="Open Folder", command=lambda: _open_in_file_manager(self.project_dir))
+        binance_open_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
+        binance_clear_btn = ttk.Button(binance_row, text="Clear", command=_clear_binance_files)
+        binance_clear_btn.grid(row=0, column=4, sticky="e", padx=(8, 0))
         
         r += 1
         
@@ -6242,7 +6295,7 @@ class PowerTraderHub(tk.Tk):
         
         kraken_row = ttk.Frame(frm)
         kraken_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
-        kraken_row.columnconfigure(0, weight=1)
+        kraken_row.columnconfigure(2, weight=1)
         
         kraken_checkbox = ttk.Checkbutton(kraken_row, variable=kraken_enabled_var)
         kraken_checkbox.grid(row=0, column=0, sticky="w")
@@ -6250,6 +6303,10 @@ class PowerTraderHub(tk.Tk):
         kraken_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
         kraken_label = ttk.Label(kraken_row, text="European exchange", foreground=DARK_MUTED)
         kraken_label.grid(row=0, column=2, sticky="w")
+        kraken_open_btn = ttk.Button(kraken_row, text="Open Folder", command=lambda: _open_in_file_manager(self.project_dir))
+        kraken_open_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
+        kraken_clear_btn = ttk.Button(kraken_row, text="Clear", command=_clear_kraken_files)
+        kraken_clear_btn.grid(row=0, column=4, sticky="e", padx=(8, 0))
         
         r += 1
         
@@ -6258,7 +6315,7 @@ class PowerTraderHub(tk.Tk):
         
         coinbase_row = ttk.Frame(frm)
         coinbase_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
-        coinbase_row.columnconfigure(0, weight=1)
+        coinbase_row.columnconfigure(2, weight=1)
         
         coinbase_checkbox = ttk.Checkbutton(coinbase_row, variable=coinbase_enabled_var)
         coinbase_checkbox.grid(row=0, column=0, sticky="w")
@@ -6266,6 +6323,10 @@ class PowerTraderHub(tk.Tk):
         coinbase_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
         coinbase_label = ttk.Label(coinbase_row, text="US-based exchange", foreground=DARK_MUTED)
         coinbase_label.grid(row=0, column=2, sticky="w")
+        coinbase_open_btn = ttk.Button(coinbase_row, text="Open Folder", command=lambda: _open_in_file_manager(self.project_dir))
+        coinbase_open_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
+        coinbase_clear_btn = ttk.Button(coinbase_row, text="Clear", command=_clear_coinbase_files)
+        coinbase_clear_btn.grid(row=0, column=4, sticky="e", padx=(8, 0))
         
         r += 1
         
@@ -6274,7 +6335,7 @@ class PowerTraderHub(tk.Tk):
         
         bybit_row = ttk.Frame(frm)
         bybit_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
-        bybit_row.columnconfigure(0, weight=1)
+        bybit_row.columnconfigure(2, weight=1)
         
         bybit_checkbox = ttk.Checkbutton(bybit_row, variable=bybit_enabled_var)
         bybit_checkbox.grid(row=0, column=0, sticky="w")
@@ -6282,6 +6343,10 @@ class PowerTraderHub(tk.Tk):
         bybit_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
         bybit_label = ttk.Label(bybit_row, text="Derivatives platform", foreground=DARK_MUTED)
         bybit_label.grid(row=0, column=2, sticky="w")
+        bybit_open_btn = ttk.Button(bybit_row, text="Open Folder", command=lambda: _open_in_file_manager(self.project_dir))
+        bybit_open_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
+        bybit_clear_btn = ttk.Button(bybit_row, text="Clear", command=_clear_bybit_files)
+        bybit_clear_btn.grid(row=0, column=4, sticky="e", padx=(8, 0))
         
         r += 1
 
