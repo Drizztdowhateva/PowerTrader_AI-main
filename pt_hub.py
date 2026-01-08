@@ -6218,38 +6218,72 @@ class PowerTraderHub(tk.Tk):
 
         ttk.Separator(frm, orient="horizontal").grid(row=r, column=0, columnspan=3, sticky="ew", pady=10); r += 1
 
-        # Future Exchange Platforms (Binance, Kraken, Coinbase, Bybit)
-        ttk.Label(frm, text="Future Exchange Platforms:", font=("Arial", 10, "bold")).grid(row=r, column=0, sticky="w", pady=(8, 4)); r += 1
+        # API Options - Additional Exchange Platforms
+        ttk.Label(frm, text="API Options:", font=("Arial", 10, "bold")).grid(row=r, column=0, sticky="w", pady=(8, 4)); r += 1
         
-        exchange_info = (
-            "Enable and configure additional exchanges below. Use the Setup Wizard buttons\n"
-            "to enter your API credentials. Checkboxes control which exchanges are active."
-        )
-        ttk.Label(frm, text=exchange_info, font=("Arial", 9), foreground=DARK_MUTED, wraplength=700).grid(row=r, column=0, columnspan=3, sticky="w", pady=(0, 8)); r += 1
+        # Binance API row
+        ttk.Label(frm, text="Binance API:").grid(row=r, column=0, sticky="w", padx=(0, 10), pady=6)
         
-        # Create rows for each future exchange with setup wizard buttons
-        exchanges = [
-            ("Binance", binance_enabled_var, "Spot & Futures trading", _open_binance_api_wizard),
-            ("Kraken", kraken_enabled_var, "European exchange", _open_kraken_api_wizard),
-            ("Coinbase", coinbase_enabled_var, "US-based exchange", _open_coinbase_api_wizard),
-            ("Bybit", bybit_enabled_var, "Derivatives platform", _open_bybit_api_wizard),
-        ]
+        binance_row = ttk.Frame(frm)
+        binance_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
+        binance_row.columnconfigure(0, weight=1)
         
-        for ex_name, ex_var, ex_desc, setup_fn in exchanges:
-            ex_row = ttk.Frame(frm)
-            ex_row.grid(row=r, column=0, columnspan=3, sticky="ew", pady=4)
-            ex_row.columnconfigure(2, weight=1)
-            
-            ex_chk = ttk.Checkbutton(ex_row, variable=ex_var)
-            ex_chk.grid(row=0, column=0, sticky="w")
-            
-            ttk.Label(ex_row, text=f"{ex_name}:", font=("Arial", 10)).grid(row=0, column=1, sticky="w", padx=(6, 0))
-            ttk.Label(ex_row, text=ex_desc, font=("Arial", 9), foreground=DARK_MUTED).grid(row=0, column=2, sticky="w", padx=(8, 0))
-            
-            setup_btn = ttk.Button(ex_row, text="Setup Wizard", command=setup_fn)
-            setup_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
-            
-            r += 1
+        binance_checkbox = ttk.Checkbutton(binance_row, variable=binance_enabled_var)
+        binance_checkbox.grid(row=0, column=0, sticky="w")
+        binance_setup_btn = ttk.Button(binance_row, text="Setup Wizard", command=_open_binance_api_wizard)
+        binance_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
+        binance_label = ttk.Label(binance_row, text="Spot & Futures", foreground=DARK_MUTED)
+        binance_label.grid(row=0, column=2, sticky="w")
+        
+        r += 1
+        
+        # Kraken API row
+        ttk.Label(frm, text="Kraken API:").grid(row=r, column=0, sticky="w", padx=(0, 10), pady=6)
+        
+        kraken_row = ttk.Frame(frm)
+        kraken_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
+        kraken_row.columnconfigure(0, weight=1)
+        
+        kraken_checkbox = ttk.Checkbutton(kraken_row, variable=kraken_enabled_var)
+        kraken_checkbox.grid(row=0, column=0, sticky="w")
+        kraken_setup_btn = ttk.Button(kraken_row, text="Setup Wizard", command=_open_kraken_api_wizard)
+        kraken_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
+        kraken_label = ttk.Label(kraken_row, text="European exchange", foreground=DARK_MUTED)
+        kraken_label.grid(row=0, column=2, sticky="w")
+        
+        r += 1
+        
+        # Coinbase API row
+        ttk.Label(frm, text="Coinbase API:").grid(row=r, column=0, sticky="w", padx=(0, 10), pady=6)
+        
+        coinbase_row = ttk.Frame(frm)
+        coinbase_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
+        coinbase_row.columnconfigure(0, weight=1)
+        
+        coinbase_checkbox = ttk.Checkbutton(coinbase_row, variable=coinbase_enabled_var)
+        coinbase_checkbox.grid(row=0, column=0, sticky="w")
+        coinbase_setup_btn = ttk.Button(coinbase_row, text="Setup Wizard", command=_open_coinbase_api_wizard)
+        coinbase_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
+        coinbase_label = ttk.Label(coinbase_row, text="US-based exchange", foreground=DARK_MUTED)
+        coinbase_label.grid(row=0, column=2, sticky="w")
+        
+        r += 1
+        
+        # Bybit API row
+        ttk.Label(frm, text="Bybit API:").grid(row=r, column=0, sticky="w", padx=(0, 10), pady=6)
+        
+        bybit_row = ttk.Frame(frm)
+        bybit_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
+        bybit_row.columnconfigure(0, weight=1)
+        
+        bybit_checkbox = ttk.Checkbutton(bybit_row, variable=bybit_enabled_var)
+        bybit_checkbox.grid(row=0, column=0, sticky="w")
+        bybit_setup_btn = ttk.Button(bybit_row, text="Setup Wizard", command=_open_bybit_api_wizard)
+        bybit_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
+        bybit_label = ttk.Label(bybit_row, text="Derivatives platform", foreground=DARK_MUTED)
+        bybit_label.grid(row=0, column=2, sticky="w")
+        
+        r += 1
 
         ttk.Separator(frm, orient="horizontal").grid(row=r, column=0, columnspan=3, sticky="ew", pady=10); r += 1
 
