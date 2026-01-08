@@ -1947,6 +1947,28 @@ class PowerTraderHub(tk.Tk):
             relief="flat",
         )
 
+        m_file = tk.Menu(
+            menubar,
+            tearoff=0,
+            bg=DARK_BG2,
+            fg=DARK_FG,
+            activebackground=DARK_SELECT_BG,
+            activeforeground=DARK_SELECT_FG,
+        )
+        m_file.add_command(label="Exit", command=self._on_close)
+        menubar.add_cascade(label="File", menu=m_file)
+
+        m_settings = tk.Menu(
+            menubar,
+            tearoff=0,
+            bg=DARK_BG2,
+            fg=DARK_FG,
+            activebackground=DARK_SELECT_BG,
+            activeforeground=DARK_SELECT_FG,
+        )
+        m_settings.add_command(label="Settings...", command=self.open_settings_dialog)
+        menubar.add_cascade(label="Settings", menu=m_settings)
+
         m_scripts = tk.Menu(
             menubar,
             tearoff=0,
@@ -1968,28 +1990,6 @@ class PowerTraderHub(tk.Tk):
         m_scripts.add_command(label="Start Trader", command=self.start_trader)
         m_scripts.add_command(label="Stop Trader", command=self.stop_trader)
         menubar.add_cascade(label="Scripts", menu=m_scripts)
-
-        m_settings = tk.Menu(
-            menubar,
-            tearoff=0,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
-        )
-        m_settings.add_command(label="Settings...", command=self.open_settings_dialog)
-        menubar.add_cascade(label="Settings", menu=m_settings)
-
-        m_file = tk.Menu(
-            menubar,
-            tearoff=0,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
-        )
-        m_file.add_command(label="Exit", command=self._on_close)
-        menubar.add_cascade(label="File", menu=m_file)
 
         self.config(menu=menubar)
 
