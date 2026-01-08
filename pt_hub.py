@@ -4636,20 +4636,33 @@ class PowerTraderHub(tk.Tk):
         settings_canvas.bind("<Configure>", _on_settings_canvas_configure, add="+")
         frm.bind("<Configure>", _update_settings_scrollbars, add="+")
 
-        # Mousewheel scrolling when the mouse is over the settings window.
-        def _wheel(e):
+        # Enhanced touchpad/mousewheel support
+        def _on_mousewheel(e):
+            """Handle mouse wheel and touchpad scrolling events."""
             try:
                 if settings_scroll.winfo_ismapped():
-                    settings_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                    # Windows/Mac mousewheel: delta is typically ±120
+                    # Adjust sensitivity: smaller divisor = more sensitive
+                    scroll_units = int(-1 * (e.delta / 120)) if e.delta else 0
+                    if scroll_units != 0:
+                        settings_canvas.yview_scroll(scroll_units, "units")
             except Exception:
                 pass
 
+        def _on_linux_scroll(e, direction):
+            """Handle Linux scroll events (Button-4 and Button-5)."""
+            try:
+                if settings_scroll.winfo_ismapped():
+                    settings_canvas.yview_scroll(direction, "units")
+            except Exception:
+                pass
+
+        settings_canvas.bind("<MouseWheel>", _on_mousewheel, add="+")  # Windows / Mac / Touchpad
+        settings_canvas.bind("<Button-4>", lambda _e: _on_linux_scroll(_e, -3), add="+")  # Linux scroll up
+        settings_canvas.bind("<Button-5>", lambda _e: _on_linux_scroll(_e, 3), add="+")   # Linux scroll down
+        
+        # Ensure canvas focus for scroll events
         settings_canvas.bind("<Enter>", lambda _e: settings_canvas.focus_set(), add="+")
-        settings_canvas.bind("<MouseWheel>", _wheel, add="+")  # Windows / Mac
-        settings_canvas.bind("<Button-4>", lambda _e: settings_canvas.yview_scroll(-3, "units"), add="+")  # Linux
-        settings_canvas.bind("<Button-5>", lambda _e: settings_canvas.yview_scroll(3, "units"), add="+")   # Linux
-
-
 
         # Make the entry column expand
         frm.columnconfigure(0, weight=0)  # labels
@@ -4687,16 +4700,16 @@ class PowerTraderHub(tk.Tk):
         chart_refresh_var = tk.StringVar(value=str(self.settings["chart_refresh_seconds"]))
         candles_limit_var = tk.StringVar(value=str(self.settings["candles_limit"]))
         auto_start_var = tk.BooleanVar(value=bool(self.settings.get("auto_start_scripts", False)))
-        robinhood_var = tk.BooleanVar(value=bool(self.settings.get("use_robinhood_api", True)))
-        kucoin_var = tk.BooleanVar(value=bool(self.settings.get("use_kucoin_api", True)))
+        robinhood_var = tk.BooleanVar(value=bool(self.settings.get("use_robinhood_api", False)))
+        kucoin_var = tk.BooleanVar(value=bool(self.settings.get("use_kucoin_api", False)))
         
         # Exchange enable/disable flags
         binance_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_binance_enabled", False)))
         kraken_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_kraken_enabled", False)))
         coinbase_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_coinbase_enabled", False)))
         bybit_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_bybit_enabled", False)))
-        robinhood_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_robinhood_enabled", True)))
-        kucoin_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_kucoin_enabled", True)))
+        robinhood_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_robinhood_enabled", False)))
+        kucoin_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_kucoin_enabled", False)))
 
         r = 0
         add_row(r, "Main neural folder:", main_dir_var, browse="dir"); r += 1
