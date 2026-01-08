@@ -2543,6 +2543,23 @@ class PowerTraderHub(tk.Tk):
         self.trainer_text.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=(0, 6))
         trainer_scroll.pack(side="right", fill="y", padx=(0, 6), pady=(0, 6))
 
+        # Enable mousewheel scrolling for all text widgets
+        def _on_mousewheel(event, text_widget):
+            scroll_direction = -1 if event.delta > 0 else 1
+            text_widget.yview_scroll(scroll_direction, "units")
+            return "break"
+
+        self.runner_text.bind("<MouseWheel>", lambda e: _on_mousewheel(e, self.runner_text))
+        self.runner_text.bind("<Button-4>", lambda e: _on_mousewheel(e, self.runner_text))  # Linux scroll up
+        self.runner_text.bind("<Button-5>", lambda e: _on_mousewheel(e, self.runner_text))  # Linux scroll down
+
+        self.trader_text.bind("<MouseWheel>", lambda e: _on_mousewheel(e, self.trader_text))
+        self.trader_text.bind("<Button-4>", lambda e: _on_mousewheel(e, self.trader_text))  # Linux scroll up
+        self.trader_text.bind("<Button-5>", lambda e: _on_mousewheel(e, self.trader_text))  # Linux scroll down
+
+        self.trainer_text.bind("<MouseWheel>", lambda e: _on_mousewheel(e, self.trainer_text))
+        self.trainer_text.bind("<Button-4>", lambda e: _on_mousewheel(e, self.trainer_text))  # Linux scroll up
+        self.trainer_text.bind("<Button-5>", lambda e: _on_mousewheel(e, self.trainer_text))  # Linux scroll down
 
         # Add left panes (no trades/history on the left anymore)
         # Default should match the screenshot: more room for Controls/Health + Neural Levels.
