@@ -288,14 +288,14 @@ DEFAULT_SETTINGS = {
     "script_neural_trainer": "pt_trainer.py",
     "script_trader": "pt_trader.py",
     "auto_start_scripts": False,
-    "use_kucoin_api": True,
+    "use_kucoin_api": False,
     # Exchange enable/disable flags
     "exchange_binance_enabled": False,
     "exchange_kraken_enabled": False,
     "exchange_coinbase_enabled": False,
     "exchange_bybit_enabled": False,
-    "exchange_robinhood_enabled": True,
-    "exchange_kucoin_enabled": True,
+    "exchange_robinhood_enabled": False,
+    "exchange_kucoin_enabled": False,
 }
 
 
