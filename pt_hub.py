@@ -289,6 +289,13 @@ DEFAULT_SETTINGS = {
     "script_trader": "pt_trader.py",
     "auto_start_scripts": False,
     "use_kucoin_api": True,
+    # Exchange enable/disable flags
+    "exchange_binance_enabled": False,
+    "exchange_kraken_enabled": False,
+    "exchange_coinbase_enabled": False,
+    "exchange_bybit_enabled": False,
+    "exchange_robinhood_enabled": True,
+    "exchange_kucoin_enabled": True,
 }
 
 
@@ -4665,6 +4672,14 @@ class PowerTraderHub(tk.Tk):
         auto_start_var = tk.BooleanVar(value=bool(self.settings.get("auto_start_scripts", False)))
         robinhood_var = tk.BooleanVar(value=bool(self.settings.get("use_robinhood_api", True)))
         kucoin_var = tk.BooleanVar(value=bool(self.settings.get("use_kucoin_api", True)))
+        
+        # Exchange enable/disable flags
+        binance_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_binance_enabled", False)))
+        kraken_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_kraken_enabled", False)))
+        coinbase_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_coinbase_enabled", False)))
+        bybit_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_bybit_enabled", False)))
+        robinhood_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_robinhood_enabled", True)))
+        kucoin_enabled_var = tk.BooleanVar(value=bool(self.settings.get("exchange_kucoin_enabled", True)))
 
         r = 0
         add_row(r, "Main neural folder:", main_dir_var, browse="dir"); r += 1
@@ -5336,6 +5351,669 @@ class PowerTraderHub(tk.Tk):
                 pass
             _refresh_kucoin_status()
 
+        # Placeholder wizards for future exchange platforms
+        def _binance_paths() -> Tuple[str, str]:
+            key_path = os.path.join(self.project_dir, "binance_key.txt")
+            secret_path = os.path.join(self.project_dir, "binance_secret.txt")
+            return key_path, secret_path
+
+        def _read_binance_files() -> Tuple[str, str]:
+            key_path, secret_path = _binance_paths()
+            try:
+                with open(key_path, "r", encoding="utf-8") as f:
+                    k = (f.read() or "").strip()
+            except Exception:
+                k = ""
+            try:
+                with open(secret_path, "r", encoding="utf-8") as f:
+                    s = (f.read() or "").strip()
+            except Exception:
+                s = ""
+            return k, s
+
+        def _open_binance_api_wizard() -> None:
+            """Binance API setup wizard."""
+            wiz = tk.Toplevel(win)
+            wiz.title("Binance API Setup")
+            wiz.geometry("900x650")
+            wiz.minsize(800, 550)
+            wiz.configure(bg=DARK_BG)
+
+            viewport = ttk.Frame(wiz)
+            viewport.pack(fill="both", expand=True, padx=12, pady=12)
+            viewport.grid_rowconfigure(0, weight=1)
+            viewport.grid_columnconfigure(0, weight=1)
+
+            wiz_canvas = tk.Canvas(viewport, bg=DARK_BG, highlightthickness=1, highlightbackground=DARK_BORDER, bd=0)
+            wiz_canvas.grid(row=0, column=0, sticky="nsew")
+
+            wiz_scroll = ttk.Scrollbar(viewport, orient="vertical", command=wiz_canvas.yview)
+            wiz_scroll.grid(row=0, column=1, sticky="ns")
+            wiz_canvas.configure(yscrollcommand=wiz_scroll.set)
+
+            container = ttk.Frame(wiz_canvas)
+            wiz_window = wiz_canvas.create_window((0, 0), window=container, anchor="nw")
+            container.columnconfigure(0, weight=1)
+
+            def _update_scrollbars(event=None):
+                try:
+                    c = wiz_canvas
+                    c.update_idletasks()
+                    bbox = c.bbox(wiz_window)
+                    if not bbox:
+                        wiz_scroll.grid_remove()
+                        return
+                    c.configure(scrollregion=bbox)
+                    content_h = int(bbox[3] - bbox[1])
+                    view_h = int(c.winfo_height())
+                    if content_h > (view_h + 1):
+                        wiz_scroll.grid()
+                    else:
+                        wiz_scroll.grid_remove()
+                        try:
+                            c.yview_moveto(0)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            def _on_canvas_configure(e):
+                try:
+                    wiz_canvas.itemconfigure(wiz_window, width=int(e.width))
+                except Exception:
+                    pass
+                _update_scrollbars()
+
+            wiz_canvas.bind("<Configure>", _on_canvas_configure, add="+")
+            container.bind("<Configure>", _update_scrollbars, add="+")
+
+            def _wheel(e):
+                try:
+                    if wiz_scroll.winfo_ismapped():
+                        wiz_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                except Exception:
+                    pass
+
+            wiz_canvas.bind("<Enter>", lambda _e: wiz_canvas.focus_set(), add="+")
+            wiz_canvas.bind("<MouseWheel>", _wheel, add="+")
+            wiz_canvas.bind("<Button-4>", lambda _e: wiz_canvas.yview_scroll(-3, "units"), add="+")
+            wiz_canvas.bind("<Button-5>", lambda _e: wiz_canvas.yview_scroll(3, "units"), add="+")
+
+            frm = ttk.Frame(container, padding=12)
+            frm.pack(fill="both", expand=True)
+            frm.columnconfigure(0, weight=1)
+
+            intro_text = (
+                "📊 Binance Spot & Futures Trading Setup\n\n"
+                "This wizard configures Binance API credentials for trading and market data.\n\n"
+                "✅ Steps:\n"
+                "  1) Go to: https://www.binance.com/en/my/settings/api-management\n"
+                "  2) Create a new API key (e.g., 'PowerTrader')\n"
+                "  3) Copy your API Key and Secret, paste them below\n"
+                "  4) Click Save to store credentials\n"
+                "  5) (Optional) Click Test to verify"
+            )
+            ttk.Label(frm, text=intro_text, justify="left", wraplength=850).pack(fill="x", pady=(0, 12))
+
+            ttk.Separator(frm, orient="horizontal").pack(fill="x", pady=8)
+
+            key_var = tk.StringVar(value="")
+            secret_var = tk.StringVar(value="")
+
+            bk, bs = _read_binance_files()
+            key_var.set(bk)
+            secret_var.set(bs)
+
+            row_frm = ttk.Frame(frm)
+            row_frm.pack(fill="x", pady=6)
+            row_frm.columnconfigure(1, weight=1)
+
+            ttk.Label(row_frm, text="API Key:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+            ttk.Entry(row_frm, textvariable=key_var, width=60).grid(row=0, column=1, sticky="ew")
+
+            row_frm2 = ttk.Frame(frm)
+            row_frm2.pack(fill="x", pady=6)
+            row_frm2.columnconfigure(1, weight=1)
+
+            ttk.Label(row_frm2, text="API Secret:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+            ttk.Entry(row_frm2, textvariable=secret_var, width=60, show="*").grid(row=0, column=1, sticky="ew")
+
+            def do_test():
+                try:
+                    import requests
+                    k, s = key_var.get().strip(), secret_var.get().strip()
+                    if not k or not s:
+                        messagebox.showwarning("Missing credentials", "Please enter both API Key and Secret.")
+                        return
+                    # Test public endpoint (no auth needed)
+                    resp = requests.get("https://api.binance.com/api/v3/time", timeout=5)
+                    if resp.status_code == 200:
+                        messagebox.showinfo("Test successful", "✅ Connected to Binance public API.")
+                    else:
+                        messagebox.showwarning("Test failed", f"Binance returned: {resp.status_code}")
+                except Exception as e:
+                    messagebox.showerror("Test error", f"Connection test failed:\n{e}")
+
+            def do_save():
+                try:
+                    k = key_var.get().strip()
+                    s = secret_var.get().strip()
+                    if not k or not s:
+                        messagebox.showwarning("Missing", "Both API Key and Secret are required.")
+                        return
+                    key_path, secret_path = _binance_paths()
+                    with open(key_path, "w", encoding="utf-8") as f:
+                        f.write(k)
+                    with open(secret_path, "w", encoding="utf-8") as f:
+                        f.write(s)
+                    messagebox.showinfo("Saved", "✅ Binance credentials saved.\nFile: binance_key.txt, binance_secret.txt")
+                    wiz.destroy()
+                except Exception as e:
+                    messagebox.showerror("Save failed", f"Couldn't save credentials:\n{e}")
+
+            btns = ttk.Frame(frm)
+            btns.pack(fill="x", pady=(12, 0))
+            ttk.Button(btns, text="Test", command=do_test).pack(side="left", padx=4)
+            ttk.Button(btns, text="Save", command=do_save).pack(side="left", padx=4)
+            ttk.Button(btns, text="Close", command=wiz.destroy).pack(side="left", padx=4)
+
+        def _kraken_paths() -> Tuple[str, str]:
+            key_path = os.path.join(self.project_dir, "kraken_key.txt")
+            secret_path = os.path.join(self.project_dir, "kraken_secret.txt")
+            return key_path, secret_path
+
+        def _read_kraken_files() -> Tuple[str, str]:
+            key_path, secret_path = _kraken_paths()
+            try:
+                with open(key_path, "r", encoding="utf-8") as f:
+                    k = (f.read() or "").strip()
+            except Exception:
+                k = ""
+            try:
+                with open(secret_path, "r", encoding="utf-8") as f:
+                    s = (f.read() or "").strip()
+            except Exception:
+                s = ""
+            return k, s
+
+        def _open_kraken_api_wizard() -> None:
+            """Kraken API setup wizard."""
+            wiz = tk.Toplevel(win)
+            wiz.title("Kraken API Setup")
+            wiz.geometry("900x650")
+            wiz.minsize(800, 550)
+            wiz.configure(bg=DARK_BG)
+
+            viewport = ttk.Frame(wiz)
+            viewport.pack(fill="both", expand=True, padx=12, pady=12)
+            viewport.grid_rowconfigure(0, weight=1)
+            viewport.grid_columnconfigure(0, weight=1)
+
+            wiz_canvas = tk.Canvas(viewport, bg=DARK_BG, highlightthickness=1, highlightbackground=DARK_BORDER, bd=0)
+            wiz_canvas.grid(row=0, column=0, sticky="nsew")
+
+            wiz_scroll = ttk.Scrollbar(viewport, orient="vertical", command=wiz_canvas.yview)
+            wiz_scroll.grid(row=0, column=1, sticky="ns")
+            wiz_canvas.configure(yscrollcommand=wiz_scroll.set)
+
+            container = ttk.Frame(wiz_canvas)
+            wiz_window = wiz_canvas.create_window((0, 0), window=container, anchor="nw")
+            container.columnconfigure(0, weight=1)
+
+            def _update_scrollbars(event=None):
+                try:
+                    c = wiz_canvas
+                    c.update_idletasks()
+                    bbox = c.bbox(wiz_window)
+                    if not bbox:
+                        wiz_scroll.grid_remove()
+                        return
+                    c.configure(scrollregion=bbox)
+                    content_h = int(bbox[3] - bbox[1])
+                    view_h = int(c.winfo_height())
+                    if content_h > (view_h + 1):
+                        wiz_scroll.grid()
+                    else:
+                        wiz_scroll.grid_remove()
+                        try:
+                            c.yview_moveto(0)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            def _on_canvas_configure(e):
+                try:
+                    wiz_canvas.itemconfigure(wiz_window, width=int(e.width))
+                except Exception:
+                    pass
+                _update_scrollbars()
+
+            wiz_canvas.bind("<Configure>", _on_canvas_configure, add="+")
+            container.bind("<Configure>", _update_scrollbars, add="+")
+
+            def _wheel(e):
+                try:
+                    if wiz_scroll.winfo_ismapped():
+                        wiz_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                except Exception:
+                    pass
+
+            wiz_canvas.bind("<Enter>", lambda _e: wiz_canvas.focus_set(), add="+")
+            wiz_canvas.bind("<MouseWheel>", _wheel, add="+")
+            wiz_canvas.bind("<Button-4>", lambda _e: wiz_canvas.yview_scroll(-3, "units"), add="+")
+            wiz_canvas.bind("<Button-5>", lambda _e: wiz_canvas.yview_scroll(3, "units"), add="+")
+
+            frm = ttk.Frame(container, padding=12)
+            frm.pack(fill="both", expand=True)
+            frm.columnconfigure(0, weight=1)
+
+            intro_text = (
+                "🏛️ Kraken Spot & Futures Trading Setup\n\n"
+                "This wizard configures Kraken API credentials for trading and market data.\n\n"
+                "✅ Steps:\n"
+                "  1) Go to: https://www.kraken.com/u/settings/api\n"
+                "  2) Click 'Generate New Key'\n"
+                "  3) Name: 'PowerTrader', Select permissions: 'Query Funds', 'Query Open Orders', 'Query Closed Orders', 'Create & Modify Orders'\n"
+                "  4) Copy your API Key and Private Key\n"
+                "  5) Paste them below and click Save"
+            )
+            ttk.Label(frm, text=intro_text, justify="left", wraplength=850).pack(fill="x", pady=(0, 12))
+
+            ttk.Separator(frm, orient="horizontal").pack(fill="x", pady=8)
+
+            key_var = tk.StringVar(value="")
+            secret_var = tk.StringVar(value="")
+
+            kk, ks = _read_kraken_files()
+            key_var.set(kk)
+            secret_var.set(ks)
+
+            row_frm = ttk.Frame(frm)
+            row_frm.pack(fill="x", pady=6)
+            row_frm.columnconfigure(1, weight=1)
+
+            ttk.Label(row_frm, text="API Key:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+            ttk.Entry(row_frm, textvariable=key_var, width=60).grid(row=0, column=1, sticky="ew")
+
+            row_frm2 = ttk.Frame(frm)
+            row_frm2.pack(fill="x", pady=6)
+            row_frm2.columnconfigure(1, weight=1)
+
+            ttk.Label(row_frm2, text="Private Key:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+            ttk.Entry(row_frm2, textvariable=secret_var, width=60, show="*").grid(row=0, column=1, sticky="ew")
+
+            def do_test():
+                try:
+                    import requests
+                    k, s = key_var.get().strip(), secret_var.get().strip()
+                    if not k or not s:
+                        messagebox.showwarning("Missing credentials", "Please enter both API Key and Private Key.")
+                        return
+                    # Test public endpoint
+                    resp = requests.get("https://api.kraken.com/0/public/Time", timeout=5)
+                    if resp.status_code == 200:
+                        messagebox.showinfo("Test successful", "✅ Connected to Kraken public API.")
+                    else:
+                        messagebox.showwarning("Test failed", f"Kraken returned: {resp.status_code}")
+                except Exception as e:
+                    messagebox.showerror("Test error", f"Connection test failed:\n{e}")
+
+            def do_save():
+                try:
+                    k = key_var.get().strip()
+                    s = secret_var.get().strip()
+                    if not k or not s:
+                        messagebox.showwarning("Missing", "Both API Key and Private Key are required.")
+                        return
+                    key_path, secret_path = _kraken_paths()
+                    with open(key_path, "w", encoding="utf-8") as f:
+                        f.write(k)
+                    with open(secret_path, "w", encoding="utf-8") as f:
+                        f.write(s)
+                    messagebox.showinfo("Saved", "✅ Kraken credentials saved.\nFile: kraken_key.txt, kraken_secret.txt")
+                    wiz.destroy()
+                except Exception as e:
+                    messagebox.showerror("Save failed", f"Couldn't save credentials:\n{e}")
+
+            btns = ttk.Frame(frm)
+            btns.pack(fill="x", pady=(12, 0))
+            ttk.Button(btns, text="Test", command=do_test).pack(side="left", padx=4)
+            ttk.Button(btns, text="Save", command=do_save).pack(side="left", padx=4)
+            ttk.Button(btns, text="Close", command=wiz.destroy).pack(side="left", padx=4)
+
+        def _coinbase_paths() -> Tuple[str, str]:
+            key_path = os.path.join(self.project_dir, "coinbase_key.txt")
+            secret_path = os.path.join(self.project_dir, "coinbase_secret.txt")
+            return key_path, secret_path
+
+        def _read_coinbase_files() -> Tuple[str, str]:
+            key_path, secret_path = _coinbase_paths()
+            try:
+                with open(key_path, "r", encoding="utf-8") as f:
+                    k = (f.read() or "").strip()
+            except Exception:
+                k = ""
+            try:
+                with open(secret_path, "r", encoding="utf-8") as f:
+                    s = (f.read() or "").strip()
+            except Exception:
+                s = ""
+            return k, s
+
+        def _open_coinbase_api_wizard() -> None:
+            """Coinbase API setup wizard."""
+            wiz = tk.Toplevel(win)
+            wiz.title("Coinbase API Setup")
+            wiz.geometry("900x650")
+            wiz.minsize(800, 550)
+            wiz.configure(bg=DARK_BG)
+
+            viewport = ttk.Frame(wiz)
+            viewport.pack(fill="both", expand=True, padx=12, pady=12)
+            viewport.grid_rowconfigure(0, weight=1)
+            viewport.grid_columnconfigure(0, weight=1)
+
+            wiz_canvas = tk.Canvas(viewport, bg=DARK_BG, highlightthickness=1, highlightbackground=DARK_BORDER, bd=0)
+            wiz_canvas.grid(row=0, column=0, sticky="nsew")
+
+            wiz_scroll = ttk.Scrollbar(viewport, orient="vertical", command=wiz_canvas.yview)
+            wiz_scroll.grid(row=0, column=1, sticky="ns")
+            wiz_canvas.configure(yscrollcommand=wiz_scroll.set)
+
+            container = ttk.Frame(wiz_canvas)
+            wiz_window = wiz_canvas.create_window((0, 0), window=container, anchor="nw")
+            container.columnconfigure(0, weight=1)
+
+            def _update_scrollbars(event=None):
+                try:
+                    c = wiz_canvas
+                    c.update_idletasks()
+                    bbox = c.bbox(wiz_window)
+                    if not bbox:
+                        wiz_scroll.grid_remove()
+                        return
+                    c.configure(scrollregion=bbox)
+                    content_h = int(bbox[3] - bbox[1])
+                    view_h = int(c.winfo_height())
+                    if content_h > (view_h + 1):
+                        wiz_scroll.grid()
+                    else:
+                        wiz_scroll.grid_remove()
+                        try:
+                            c.yview_moveto(0)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            def _on_canvas_configure(e):
+                try:
+                    wiz_canvas.itemconfigure(wiz_window, width=int(e.width))
+                except Exception:
+                    pass
+                _update_scrollbars()
+
+            wiz_canvas.bind("<Configure>", _on_canvas_configure, add="+")
+            container.bind("<Configure>", _update_scrollbars, add="+")
+
+            def _wheel(e):
+                try:
+                    if wiz_scroll.winfo_ismapped():
+                        wiz_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                except Exception:
+                    pass
+
+            wiz_canvas.bind("<Enter>", lambda _e: wiz_canvas.focus_set(), add="+")
+            wiz_canvas.bind("<MouseWheel>", _wheel, add="+")
+            wiz_canvas.bind("<Button-4>", lambda _e: wiz_canvas.yview_scroll(-3, "units"), add="+")
+            wiz_canvas.bind("<Button-5>", lambda _e: wiz_canvas.yview_scroll(3, "units"), add="+")
+
+            frm = ttk.Frame(container, padding=12)
+            frm.pack(fill="both", expand=True)
+            frm.columnconfigure(0, weight=1)
+
+            intro_text = (
+                "🪙 Coinbase Advanced Trading Setup\n\n"
+                "This wizard configures Coinbase API credentials for trading and market data.\n\n"
+                "✅ Steps:\n"
+                "  1) Go to: https://coinbase.com/settings/api (requires Pro account)\n"
+                "  2) Click 'New API Key'\n"
+                "  3) Give it a name: 'PowerTrader'\n"
+                "  4) Enable permissions: 'wallet:accounts:read', 'wallet:sells:create', 'wallet:buys:create'\n"
+                "  5) Copy the API Key and Secret Passphrase\n"
+                "  6) Paste them below and click Save"
+            )
+            ttk.Label(frm, text=intro_text, justify="left", wraplength=850).pack(fill="x", pady=(0, 12))
+
+            ttk.Separator(frm, orient="horizontal").pack(fill="x", pady=8)
+
+            key_var = tk.StringVar(value="")
+            secret_var = tk.StringVar(value="")
+
+            ck, cs = _read_coinbase_files()
+            key_var.set(ck)
+            secret_var.set(cs)
+
+            row_frm = ttk.Frame(frm)
+            row_frm.pack(fill="x", pady=6)
+            row_frm.columnconfigure(1, weight=1)
+
+            ttk.Label(row_frm, text="API Key:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+            ttk.Entry(row_frm, textvariable=key_var, width=60).grid(row=0, column=1, sticky="ew")
+
+            row_frm2 = ttk.Frame(frm)
+            row_frm2.pack(fill="x", pady=6)
+            row_frm2.columnconfigure(1, weight=1)
+
+            ttk.Label(row_frm2, text="Secret:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+            ttk.Entry(row_frm2, textvariable=secret_var, width=60, show="*").grid(row=0, column=1, sticky="ew")
+
+            def do_test():
+                try:
+                    import requests
+                    k, s = key_var.get().strip(), secret_var.get().strip()
+                    if not k or not s:
+                        messagebox.showwarning("Missing credentials", "Please enter both API Key and Secret.")
+                        return
+                    # Test public endpoint
+                    resp = requests.get("https://api.coinbase.com/v2/exchange-rates?currency=USD", timeout=5)
+                    if resp.status_code == 200:
+                        messagebox.showinfo("Test successful", "✅ Connected to Coinbase public API.")
+                    else:
+                        messagebox.showwarning("Test failed", f"Coinbase returned: {resp.status_code}")
+                except Exception as e:
+                    messagebox.showerror("Test error", f"Connection test failed:\n{e}")
+
+            def do_save():
+                try:
+                    k = key_var.get().strip()
+                    s = secret_var.get().strip()
+                    if not k or not s:
+                        messagebox.showwarning("Missing", "Both API Key and Secret are required.")
+                        return
+                    key_path, secret_path = _coinbase_paths()
+                    with open(key_path, "w", encoding="utf-8") as f:
+                        f.write(k)
+                    with open(secret_path, "w", encoding="utf-8") as f:
+                        f.write(s)
+                    messagebox.showinfo("Saved", "✅ Coinbase credentials saved.\nFile: coinbase_key.txt, coinbase_secret.txt")
+                    wiz.destroy()
+                except Exception as e:
+                    messagebox.showerror("Save failed", f"Couldn't save credentials:\n{e}")
+
+            btns = ttk.Frame(frm)
+            btns.pack(fill="x", pady=(12, 0))
+            ttk.Button(btns, text="Test", command=do_test).pack(side="left", padx=4)
+            ttk.Button(btns, text="Save", command=do_save).pack(side="left", padx=4)
+            ttk.Button(btns, text="Close", command=wiz.destroy).pack(side="left", padx=4)
+
+        def _bybit_paths() -> Tuple[str, str]:
+            key_path = os.path.join(self.project_dir, "bybit_key.txt")
+            secret_path = os.path.join(self.project_dir, "bybit_secret.txt")
+            return key_path, secret_path
+
+        def _read_bybit_files() -> Tuple[str, str]:
+            key_path, secret_path = _bybit_paths()
+            try:
+                with open(key_path, "r", encoding="utf-8") as f:
+                    k = (f.read() or "").strip()
+            except Exception:
+                k = ""
+            try:
+                with open(secret_path, "r", encoding="utf-8") as f:
+                    s = (f.read() or "").strip()
+            except Exception:
+                s = ""
+            return k, s
+
+        def _open_bybit_api_wizard() -> None:
+            """Bybit API setup wizard."""
+            wiz = tk.Toplevel(win)
+            wiz.title("Bybit API Setup")
+            wiz.geometry("900x650")
+            wiz.minsize(800, 550)
+            wiz.configure(bg=DARK_BG)
+
+            viewport = ttk.Frame(wiz)
+            viewport.pack(fill="both", expand=True, padx=12, pady=12)
+            viewport.grid_rowconfigure(0, weight=1)
+            viewport.grid_columnconfigure(0, weight=1)
+
+            wiz_canvas = tk.Canvas(viewport, bg=DARK_BG, highlightthickness=1, highlightbackground=DARK_BORDER, bd=0)
+            wiz_canvas.grid(row=0, column=0, sticky="nsew")
+
+            wiz_scroll = ttk.Scrollbar(viewport, orient="vertical", command=wiz_canvas.yview)
+            wiz_scroll.grid(row=0, column=1, sticky="ns")
+            wiz_canvas.configure(yscrollcommand=wiz_scroll.set)
+
+            container = ttk.Frame(wiz_canvas)
+            wiz_window = wiz_canvas.create_window((0, 0), window=container, anchor="nw")
+            container.columnconfigure(0, weight=1)
+
+            def _update_scrollbars(event=None):
+                try:
+                    c = wiz_canvas
+                    c.update_idletasks()
+                    bbox = c.bbox(wiz_window)
+                    if not bbox:
+                        wiz_scroll.grid_remove()
+                        return
+                    c.configure(scrollregion=bbox)
+                    content_h = int(bbox[3] - bbox[1])
+                    view_h = int(c.winfo_height())
+                    if content_h > (view_h + 1):
+                        wiz_scroll.grid()
+                    else:
+                        wiz_scroll.grid_remove()
+                        try:
+                            c.yview_moveto(0)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            def _on_canvas_configure(e):
+                try:
+                    wiz_canvas.itemconfigure(wiz_window, width=int(e.width))
+                except Exception:
+                    pass
+                _update_scrollbars()
+
+            wiz_canvas.bind("<Configure>", _on_canvas_configure, add="+")
+            container.bind("<Configure>", _update_scrollbars, add="+")
+
+            def _wheel(e):
+                try:
+                    if wiz_scroll.winfo_ismapped():
+                        wiz_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                except Exception:
+                    pass
+
+            wiz_canvas.bind("<Enter>", lambda _e: wiz_canvas.focus_set(), add="+")
+            wiz_canvas.bind("<MouseWheel>", _wheel, add="+")
+            wiz_canvas.bind("<Button-4>", lambda _e: wiz_canvas.yview_scroll(-3, "units"), add="+")
+            wiz_canvas.bind("<Button-5>", lambda _e: wiz_canvas.yview_scroll(3, "units"), add="+")
+
+            frm = ttk.Frame(container, padding=12)
+            frm.pack(fill="both", expand=True)
+            frm.columnconfigure(0, weight=1)
+
+            intro_text = (
+                "⚡ Bybit Spot & Derivatives Trading Setup\n\n"
+                "This wizard configures Bybit API credentials for trading and market data.\n\n"
+                "✅ Steps:\n"
+                "  1) Go to: https://www.bybit.com/en/user-center/api-management\n"
+                "  2) Click 'Create New Key'\n"
+                "  3) Set permissions: 'Account', 'Orders', 'Exchange'\n"
+                "  4) Copy your API Key and Secret Key\n"
+                "  5) Paste them below and click Save\n"
+                "  6) (Optional) Set IP whitelist to your current IP for security"
+            )
+            ttk.Label(frm, text=intro_text, justify="left", wraplength=850).pack(fill="x", pady=(0, 12))
+
+            ttk.Separator(frm, orient="horizontal").pack(fill="x", pady=8)
+
+            key_var = tk.StringVar(value="")
+            secret_var = tk.StringVar(value="")
+
+            byk, bys = _read_bybit_files()
+            key_var.set(byk)
+            secret_var.set(bys)
+
+            row_frm = ttk.Frame(frm)
+            row_frm.pack(fill="x", pady=6)
+            row_frm.columnconfigure(1, weight=1)
+
+            ttk.Label(row_frm, text="API Key:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+            ttk.Entry(row_frm, textvariable=key_var, width=60).grid(row=0, column=1, sticky="ew")
+
+            row_frm2 = ttk.Frame(frm)
+            row_frm2.pack(fill="x", pady=6)
+            row_frm2.columnconfigure(1, weight=1)
+
+            ttk.Label(row_frm2, text="Secret Key:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+            ttk.Entry(row_frm2, textvariable=secret_var, width=60, show="*").grid(row=0, column=1, sticky="ew")
+
+            def do_test():
+                try:
+                    import requests
+                    k, s = key_var.get().strip(), secret_var.get().strip()
+                    if not k or not s:
+                        messagebox.showwarning("Missing credentials", "Please enter both API Key and Secret Key.")
+                        return
+                    # Test public endpoint
+                    resp = requests.get("https://api.bybit.com/v5/market/time", timeout=5)
+                    if resp.status_code == 200:
+                        messagebox.showinfo("Test successful", "✅ Connected to Bybit public API.")
+                    else:
+                        messagebox.showwarning("Test failed", f"Bybit returned: {resp.status_code}")
+                except Exception as e:
+                    messagebox.showerror("Test error", f"Connection test failed:\n{e}")
+
+            def do_save():
+                try:
+                    k = key_var.get().strip()
+                    s = secret_var.get().strip()
+                    if not k or not s:
+                        messagebox.showwarning("Missing", "Both API Key and Secret Key are required.")
+                        return
+                    key_path, secret_path = _bybit_paths()
+                    with open(key_path, "w", encoding="utf-8") as f:
+                        f.write(k)
+                    with open(secret_path, "w", encoding="utf-8") as f:
+                        f.write(s)
+                    messagebox.showinfo("Saved", "✅ Bybit credentials saved.\nFile: bybit_key.txt, bybit_secret.txt")
+                    wiz.destroy()
+                except Exception as e:
+                    messagebox.showerror("Save failed", f"Couldn't save credentials:\n{e}")
+
+            btns = ttk.Frame(frm)
+            btns.pack(fill="x", pady=(12, 0))
+            ttk.Button(btns, text="Test", command=do_test).pack(side="left", padx=4)
+            ttk.Button(btns, text="Save", command=do_save).pack(side="left", padx=4)
+            ttk.Button(btns, text="Close", command=wiz.destroy).pack(side="left", padx=4)
+
         def _open_kucoin_api_wizard() -> None:
             try:
                 import webbrowser
@@ -5538,6 +6216,37 @@ class PowerTraderHub(tk.Tk):
         _update_robinhood_buttons()
         _update_kucoin_buttons()
 
+        ttk.Separator(frm, orient="horizontal").grid(row=r, column=0, columnspan=3, sticky="ew", pady=10); r += 1
+
+        # Future Exchange Platforms (Binance, Kraken, Coinbase, Bybit)
+        ttk.Label(frm, text="Future Exchange Platforms:", font=("Arial", 10, "bold")).grid(row=r, column=0, sticky="w", pady=(8, 4)); r += 1
+        
+        exchange_info = (
+            "Enable additional exchanges below. Setup wizards and credential management\n"
+            "for these platforms are coming in future updates."
+        )
+        ttk.Label(frm, text=exchange_info, font=("Arial", 9), foreground=DARK_MUTED, wraplength=700).grid(row=r, column=0, columnspan=3, sticky="w", pady=(0, 8)); r += 1
+        
+        # Create rows for each future exchange
+        exchanges = [
+            ("Binance", binance_enabled_var, "Spot & Futures trading"),
+            ("Kraken", kraken_enabled_var, "European exchange"),
+            ("Coinbase", coinbase_enabled_var, "US-based exchange"),
+            ("Bybit", bybit_enabled_var, "Derivatives platform"),
+        ]
+        
+        for ex_name, ex_var, ex_desc in exchanges:
+            ex_row = ttk.Frame(frm)
+            ex_row.grid(row=r, column=0, columnspan=3, sticky="ew", pady=4)
+            ex_row.columnconfigure(1, weight=1)
+            
+            ex_chk = ttk.Checkbutton(ex_row, variable=ex_var)
+            ex_chk.grid(row=0, column=0, sticky="w")
+            
+            ttk.Label(ex_row, text=f"{ex_name}:", font=("Arial", 10)).grid(row=0, column=1, sticky="w", padx=(6, 0))
+            ttk.Label(ex_row, text=ex_desc, font=("Arial", 9), foreground=DARK_MUTED).grid(row=0, column=2, sticky="w", padx=(8, 0))
+            
+            r += 1
 
         ttk.Separator(frm, orient="horizontal").grid(row=r, column=0, columnspan=3, sticky="ew", pady=10); r += 1
 
@@ -5573,6 +6282,15 @@ class PowerTraderHub(tk.Tk):
                 self.settings["auto_start_scripts"] = bool(auto_start_var.get())
                 self.settings["use_kucoin_api"] = bool(kucoin_var.get())
                 self.settings["use_robinhood_api"] = bool(robinhood_var.get())
+                
+                # Exchange enable/disable flags
+                self.settings["exchange_robinhood_enabled"] = bool(robinhood_enabled_var.get())
+                self.settings["exchange_kucoin_enabled"] = bool(kucoin_enabled_var.get())
+                self.settings["exchange_binance_enabled"] = bool(binance_enabled_var.get())
+                self.settings["exchange_kraken_enabled"] = bool(kraken_enabled_var.get())
+                self.settings["exchange_coinbase_enabled"] = bool(coinbase_enabled_var.get())
+                self.settings["exchange_bybit_enabled"] = bool(bybit_enabled_var.get())
+                
                 self._save_settings()
 
                 # If new coin(s) were added and their training folder doesn't exist yet,

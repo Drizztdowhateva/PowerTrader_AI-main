@@ -1,10 +1,30 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Robinhood credentials
 r_key.txt
 r_secret.txt
+r_key.txt.bak_*
+r_secret.txt.bak_*
+
+# KuCoin credentials
 ku_key.txt
 ku_secret.txt
 ku_passphrase.txt
-r_key.txt.bak_*
-r_secret.txt.bak_*
+
+# Binance credentials
+binance_key.txt
+binance_secret.txt
+
+# Kraken credentials
+kraken_key.txt
+kraken_secret.txt
+
+# Coinbase credentials
+coinbase_key.txt
+coinbase_secret.txt
+
+# Bybit credentials
+bybit_key.txt
+bybit_secret.txt
