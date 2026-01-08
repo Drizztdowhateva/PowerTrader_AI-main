@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+r_key.txt
+r_secret.txt
+ku_key.txt
+ku_secret.txt
+ku_passphrase.txt
+r_key.txt.bak_*
+r_secret.txt.bak_*
