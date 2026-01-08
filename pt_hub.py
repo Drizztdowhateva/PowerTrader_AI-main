@@ -6222,29 +6222,32 @@ class PowerTraderHub(tk.Tk):
         ttk.Label(frm, text="Future Exchange Platforms:", font=("Arial", 10, "bold")).grid(row=r, column=0, sticky="w", pady=(8, 4)); r += 1
         
         exchange_info = (
-            "Enable additional exchanges below. Setup wizards and credential management\n"
-            "for these platforms are coming in future updates."
+            "Enable and configure additional exchanges below. Use the Setup Wizard buttons\n"
+            "to enter your API credentials. Checkboxes control which exchanges are active."
         )
         ttk.Label(frm, text=exchange_info, font=("Arial", 9), foreground=DARK_MUTED, wraplength=700).grid(row=r, column=0, columnspan=3, sticky="w", pady=(0, 8)); r += 1
         
-        # Create rows for each future exchange
+        # Create rows for each future exchange with setup wizard buttons
         exchanges = [
-            ("Binance", binance_enabled_var, "Spot & Futures trading"),
-            ("Kraken", kraken_enabled_var, "European exchange"),
-            ("Coinbase", coinbase_enabled_var, "US-based exchange"),
-            ("Bybit", bybit_enabled_var, "Derivatives platform"),
+            ("Binance", binance_enabled_var, "Spot & Futures trading", _open_binance_api_wizard),
+            ("Kraken", kraken_enabled_var, "European exchange", _open_kraken_api_wizard),
+            ("Coinbase", coinbase_enabled_var, "US-based exchange", _open_coinbase_api_wizard),
+            ("Bybit", bybit_enabled_var, "Derivatives platform", _open_bybit_api_wizard),
         ]
         
-        for ex_name, ex_var, ex_desc in exchanges:
+        for ex_name, ex_var, ex_desc, setup_fn in exchanges:
             ex_row = ttk.Frame(frm)
             ex_row.grid(row=r, column=0, columnspan=3, sticky="ew", pady=4)
-            ex_row.columnconfigure(1, weight=1)
+            ex_row.columnconfigure(2, weight=1)
             
             ex_chk = ttk.Checkbutton(ex_row, variable=ex_var)
             ex_chk.grid(row=0, column=0, sticky="w")
             
             ttk.Label(ex_row, text=f"{ex_name}:", font=("Arial", 10)).grid(row=0, column=1, sticky="w", padx=(6, 0))
             ttk.Label(ex_row, text=ex_desc, font=("Arial", 9), foreground=DARK_MUTED).grid(row=0, column=2, sticky="w", padx=(8, 0))
+            
+            setup_btn = ttk.Button(ex_row, text="Setup Wizard", command=setup_fn)
+            setup_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
             
             r += 1
 
