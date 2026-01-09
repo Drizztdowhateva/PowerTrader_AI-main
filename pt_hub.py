@@ -35,6 +35,10 @@ DARK_SELECT_BG = "#17324A"
 DARK_SELECT_FG = "#00FF66"
 
 
+# Global scale applied to chart figure sizes (1.0 = 100%).
+# Set to 0.95 to reduce chart size by 5%.
+CHART_SCALE = 0.95
+
 @dataclass
 class _WrapItem:
     w: tk.Widget
@@ -44,11 +48,17 @@ class _WrapItem:
 
 class WrapFrame(ttk.Frame):
 
-    def __init__(self, parent, **kwargs):
+    def __init__(self, parent, orientation: str = "vertical", **kwargs):
+        """A simple container that lays out added widgets.
+
+        orientation: "vertical" (default) places items in a column.
+        orientation: "horizontal" places items in a single row.
+        """
         super().__init__(parent, **kwargs)
         self._items: List[_WrapItem] = []
         self._reflow_pending = False
         self._in_reflow = False
+        self._orientation = str(orientation or "vertical").lower()
         self.bind("<Configure>", self._schedule_reflow)
 
     def add(self, widget: tk.Widget, padx=(0, 0), pady=(0, 0)) -> None:
@@ -77,58 +87,92 @@ class WrapFrame(ttk.Frame):
         self.after_idle(self._reflow)
 
     def _reflow(self) -> None:
-        if self._in_reflow:
-            self._reflow_pending = False
-            return
-
+        # Support both vertical and horizontal layouts. Vertical places each
+        # widget on its own row. Horizontal places widgets on a single row
+        # across increasing columns (no wrapping).
         self._reflow_pending = False
+        if self._in_reflow:
+            return
         self._in_reflow = True
         try:
-            width = self.winfo_width()
-            if width <= 1:
-                return
-            usable_width = max(1, width - 6)
+            for w in self._items:
+                try:
+                    w.w.grid_forget()
+                except Exception:
+                    pass
 
-            for it in self._items:
-                it.w.grid_forget()
-
-            row = 0
-            col = 0
-            x = 0
-
-            for it in self._items:
-                reqw = max(it.w.winfo_reqwidth(), it.w.winfo_width())
-
-                needed = 10 + reqw + it.padx[0] + it.padx[1]
-
-                if col > 0 and (x + needed) > usable_width:
-                    row += 1
+            if self._orientation == "horizontal":
+                # Try to wrap items across multiple rows to fit the available width.
+                try:
+                    self.update_idletasks()
+                except Exception:
+                    pass
+                avail_w = max(1, self.winfo_width() or 1)
+                # If _nowrap is set, force a single left-to-right row (scrollable)
+                if getattr(self, "_nowrap", False):
+                    row = 0
                     col = 0
-                    x = 0
+                    for it in self._items:
+                        try:
+                            it.w.grid(row=row, column=col, padx=it.padx, pady=it.pady, sticky="w")
+                        except Exception:
+                            try:
+                                it.w.grid(row=row, column=col)
+                            except Exception:
+                                pass
+                        col += 1
+                else:
+                    row = 0
+                    col = 0
+                    used_w = 0
+                    for it in self._items:
+                        try:
+                            req_w = int(it.w.winfo_reqwidth() or 0)
+                        except Exception:
+                            req_w = 0
+                        # pad left+right
+                        pad_w = int((it.padx[0] or 0) + (it.padx[1] or 0))
+                        total_w = req_w + pad_w
 
-                it.w.grid(row=row, column=col, sticky="w", padx=it.padx, pady=it.pady)
-                x += needed
-                col += 1
+                        # If item doesn't fit on current row, move to next row
+                        if col > 0 and (used_w + total_w) > avail_w:
+                            row += 1
+                            col = 0
+                            used_w = 0
+
+                        try:
+                            it.w.grid(row=row, column=col, padx=it.padx, pady=it.pady, sticky="nw")
+                        except Exception:
+                            try:
+                                it.w.grid(row=row, column=col)
+                            except Exception:
+                                pass
+
+                        used_w += total_w
+                        col += 1
+            else:
+                row = 0
+                for it in self._items:
+                    try:
+                        it.w.grid(row=row, column=0, padx=it.padx, pady=it.pady, sticky="nw")
+                    except Exception:
+                        try:
+                            it.w.grid(row=row, column=0)
+                        except Exception:
+                            pass
+                    row += 1
         finally:
             self._in_reflow = False
 
-
+# Compact NeuralSignalTile class (module-level)
 class NeuralSignalTile(ttk.Frame):
+    """Compact tile showing neural long/short levels for a coin."""
 
-    def __init__(self, parent: tk.Widget, coin: str, bar_height: int = 52, levels: int = 8):
+    def __init__(self, parent, coin: str, bar_height: int = 56, display_levels: int = 7):
         super().__init__(parent)
         self.coin = coin
-
-        self._hover_on = False
-        self._normal_canvas_bg = DARK_PANEL2
-        self._hover_canvas_bg = DARK_PANEL
-        self._normal_border = DARK_BORDER
-        self._hover_border = DARK_ACCENT2
-        self._normal_fg = DARK_FG
-        self._hover_fg = DARK_ACCENT2
-
-        self._levels = max(2, int(levels))             
-        self._display_levels = self._levels - 1        
+        self._display_levels = int(display_levels)
+        self._levels = int(display_levels)
 
         self._bar_h = int(bar_height)
         self._bar_w = 12
@@ -138,6 +182,14 @@ class NeuralSignalTile(ttk.Frame):
         self._base_fill = DARK_PANEL
         self._long_fill = "blue"
         self._short_fill = "orange"
+
+        self._hover_on = False
+        self._normal_canvas_bg = DARK_PANEL2
+        self._hover_canvas_bg = DARK_PANEL
+        self._normal_border = DARK_BORDER
+        self._hover_border = DARK_ACCENT
+        self._normal_fg = DARK_FG
+        self._hover_fg = DARK_ACCENT
 
         self.title_lbl = ttk.Label(self, text=coin)
         self.title_lbl.pack(anchor="center")
@@ -161,34 +213,19 @@ class NeuralSignalTile(ttk.Frame):
         x3 = x2 + self._bar_w
         yb = self._pad + self._bar_h
 
-        # Build segmented bars: 7 segments for levels 1..7 (level 0 is "no highlight")
         self._long_segs: List[int] = []
         self._short_segs: List[int] = []
 
         for seg in range(self._display_levels):
-            # seg=0 is bottom segment (level 1), seg=display_levels-1 is top segment (level 7)
             y_top = int(round(yb - ((seg + 1) * self._bar_h / self._display_levels)))
             y_bot = int(round(yb - (seg * self._bar_h / self._display_levels)))
-
             self._long_segs.append(
-                self.canvas.create_rectangle(
-                    x0, y_top, x1, y_bot,
-                    fill=self._base_fill,
-                    outline=DARK_BORDER,
-                    width=1,
-                )
+                self.canvas.create_rectangle(x0, y_top, x1, y_bot, fill=self._base_fill, outline=DARK_BORDER, width=1)
             )
             self._short_segs.append(
-                self.canvas.create_rectangle(
-                    x2, y_top, x3, y_bot,
-                    fill=self._base_fill,
-                    outline=DARK_BORDER,
-                    width=1,
-                )
+                self.canvas.create_rectangle(x2, y_top, x3, y_bot, fill=self._base_fill, outline=DARK_BORDER, width=1)
             )
 
-        # Marker line after the 2nd block (between 2 and 3) -- LONG side only.
-        # With display_levels=7, "after 2nd block" means boundary after seg index 1.
         trade_y = int(round(yb - (2 * self._bar_h / self._display_levels)))
         self.canvas.create_line(x0, trade_y, x1, trade_y, fill=DARK_FG, width=2)
 
@@ -198,63 +235,44 @@ class NeuralSignalTile(ttk.Frame):
         self.set_values(0, 0)
 
     def set_hover(self, on: bool) -> None:
-        """Visually highlight the tile on hover (like a button hover state)."""
         if bool(on) == bool(self._hover_on):
             return
         self._hover_on = bool(on)
-
         try:
             if self._hover_on:
-                self.canvas.configure(
-                    bg=self._hover_canvas_bg,
-                    highlightbackground=self._hover_border,
-                    highlightthickness=2,
-                )
+                self.canvas.configure(bg=self._hover_canvas_bg, highlightbackground=self._hover_border, highlightthickness=2)
                 self.title_lbl.configure(foreground=self._hover_fg)
                 self.value_lbl.configure(foreground=self._hover_fg)
             else:
-                self.canvas.configure(
-                    bg=self._normal_canvas_bg,
-                    highlightbackground=self._normal_border,
-                    highlightthickness=1,
-                )
+                self.canvas.configure(bg=self._normal_canvas_bg, highlightbackground=self._normal_border, highlightthickness=1)
                 self.title_lbl.configure(foreground=self._normal_fg)
                 self.value_lbl.configure(foreground=self._normal_fg)
         except Exception:
             pass
-
 
     def _clamp_level(self, value: Any) -> int:
         try:
             v = int(float(value))
         except Exception:
             v = 0
-        return max(0, min(v, self._levels - 1))  # logical clamp: 0..7
+        return max(0, min(v, self._levels - 1))
 
     def _set_level(self, seg_ids: List[int], level: int, active_fill: str) -> None:
-        # Reset all segments to base
         for rid in seg_ids:
             self.canvas.itemconfigure(rid, fill=self._base_fill)
-
-        # Level 0 -> show nothing (no highlight)
         if level <= 0:
             return
-
-        # Level 1..7 -> fill from bottom up through the current level
-        idx = level - 1  # level 1 maps to seg index 0
+        idx = level - 1
         if idx < 0:
             return
         if idx >= len(seg_ids):
             idx = len(seg_ids) - 1
-
         for i in range(idx + 1):
             self.canvas.itemconfigure(seg_ids[i], fill=active_fill)
-
 
     def set_values(self, long_sig: Any, short_sig: Any) -> None:
         ls = self._clamp_level(long_sig)
         ss = self._clamp_level(short_sig)
-
         self.value_lbl.config(text=f"L:{ls} S:{ss}")
         self._set_level(self._long_segs, ls, self._long_fill)
         self._set_level(self._short_segs, ss, self._short_fill)
@@ -347,6 +365,24 @@ def _read_trade_history_jsonl(path: str) -> List[dict]:
 
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
+
+
+def _open_in_file_manager(path: str) -> None:
+    """Open the given path in the system file manager (cross-platform)."""
+    try:
+        p = os.path.abspath(path)
+        if os.name == "nt":
+            os.startfile(p)  # type: ignore[attr-defined]
+            return
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", p])
+            return
+        subprocess.Popen(["xdg-open", p])
+    except Exception as e:
+        try:
+            messagebox.showerror("Couldn't open folder", f"Tried to open:\n{path}\n\nError:\n{e}")
+        except Exception:
+            pass
 
 
 
@@ -719,13 +755,12 @@ class CandleChart(ttk.Frame):
         # IMPORTANT: keep a stable DPI and resize the figure to the widget's pixel size.
         # On Windows scaling, trying to "sync DPI" via winfo_fpixels("1i") can produce the
         # exact right-side blank/covered region you're seeing.
-        self.fig = Figure(figsize=(6.5, 3.5), dpi=100)
+        self.fig = Figure(figsize=(6.5 * CHART_SCALE, 3.5 * CHART_SCALE), dpi=100)
         self.fig.patch.set_facecolor(DARK_BG)
 
-        # Reserve bottom space so date+time x tick labels are always visible
-        # Also reserve right space so the price labels (Bid/Ask/DCA/Sell) can sit outside the plot.
-        # Also reserve a bit of top space so the title never gets clipped.
-        self.fig.subplots_adjust(bottom=0.20, right=0.87, top=0.8)
+        # Use tighter margins so the plot fills the available widget area while
+        # still leaving room for x-tick labels and a small right margin for price labels.
+        self.fig.subplots_adjust(left=0.06, right=0.98, bottom=0.12, top=0.95)
 
         self.ax = self.fig.add_subplot(111)
         self._apply_dark_chart_style()
@@ -1158,13 +1193,12 @@ class AccountValueChart(ttk.Frame):
         self.last_update_label = ttk.Label(top, text="Last: N/A")
         self.last_update_label.pack(side="right")
 
-        self.fig = Figure(figsize=(6.5, 3.5), dpi=100)
+        self.fig = Figure(figsize=(6.5 * CHART_SCALE, 3.5 * CHART_SCALE), dpi=100)
         self.fig.patch.set_facecolor(DARK_BG)
 
-        # Reserve bottom space so date+time x tick labels are always visible
-        # Also reserve right space so the price labels (Bid/Ask/DCA/Sell) can sit outside the plot.
-        # Also reserve a bit of top space so the title never gets clipped.
-        self.fig.subplots_adjust(bottom=0.25, right=0.87, top=0.8)
+        # Use tighter margins so the plot fills the available widget area while
+        # still leaving room for x-tick labels and a small right margin for price labels.
+        self.fig.subplots_adjust(left=0.06, right=0.98, bottom=0.12, top=0.95)
 
         self.ax = self.fig.add_subplot(111)
         self._apply_dark_chart_style()
@@ -1512,6 +1546,30 @@ class PowerTraderHub(tk.Tk):
 
         self.settings = self._load_settings()
 
+        # Snapshot of last-saved sash positions so we can detect changes
+        try:
+            self._last_saved_sashes = dict(self.settings.get("pane_sashes", {}) or {})
+        except Exception:
+            self._last_saved_sashes = {}
+
+        # Restore saved window geometry if present
+        try:
+            geom = self.settings.get("window_geometry")
+            if isinstance(geom, str) and geom:
+                try:
+                    self.geometry(geom)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        
+        # Start in fullscreen mode
+        self.attributes('-fullscreen', True)
+        
+        # Bind F11 to toggle fullscreen and Escape to exit fullscreen
+        self.bind('<F11>', lambda e: self.attributes('-fullscreen', not self.attributes('-fullscreen')))
+        self.bind('<Escape>', lambda e: self.attributes('-fullscreen', False))
+
         self.project_dir = os.path.abspath(os.path.dirname(__file__))
 
         # hub data dir
@@ -1531,6 +1589,9 @@ class PowerTraderHub(tk.Tk):
 
         # internal: when Start All is pressed, we start the runner first and only start the trader once ready
         self._auto_start_trader_pending = False
+        
+        # internal: when Start All is pressed before training, auto-start runner after training completes
+        self._auto_start_runner_after_training = False
 
 
         # cache latest trader status so charts can overlay buy/sell lines
@@ -1891,6 +1952,337 @@ class PowerTraderHub(tk.Tk):
     def _save_settings(self) -> None:
         _safe_write_json(SETTINGS_FILE, self.settings)
 
+    def _on_close(self) -> None:
+        """Save window geometry to settings and exit."""
+        try:
+            geom = self.geometry()
+            if geom:
+                try:
+                    self.settings["window_geometry"] = geom
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Save panedwindow sash positions so trainer levels and charts sizing persist
+        try:
+            s = self.settings.setdefault("pane_sashes", {})
+            try:
+                if hasattr(self, "_pw_outer") and getattr(self, "_pw_outer"):
+                    try:
+                        s["outer"] = int(self._pw_outer.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_pw_left_split") and getattr(self, "_pw_left_split"):
+                    try:
+                        s["left_split"] = int(self._pw_left_split.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_pw_right_split") and getattr(self, "_pw_right_split"):
+                    try:
+                        s["right_split"] = int(self._pw_right_split.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_pw_right_bottom_split") and getattr(self, "_pw_right_bottom_split"):
+                    try:
+                        s["right_bottom_split"] = int(self._pw_right_bottom_split.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        except Exception:
+            pass
+
+        try:
+            self._save_settings()
+        except Exception:
+            pass
+
+    def _open_resize_dialog(self) -> None:
+        """Opens a dialog to resize the main window."""
+        dialog = tk.Toplevel(self)
+        dialog.title("Resize Window")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        
+        # Configure dark mode styling for the dialog
+        dialog.configure(bg=DARK_BG2)
+        
+        # Parse current geometry
+        current_geom = self.geometry()
+        # Format: WIDTHxHEIGHT+X+Y
+        try:
+            size_part, *pos_parts = current_geom.split('+')
+            width_str, height_str = size_part.split('x')
+            current_width = int(width_str)
+            current_height = int(height_str)
+        except Exception:
+            current_width = 1400
+            current_height = 820
+        
+        # Create dialog content
+        frame = ttk.Frame(dialog, style="Dark.TFrame")
+        frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Width field
+        ttk.Label(
+            frame,
+            text="Width:",
+            style="Dark.TLabel"
+        ).grid(row=0, column=0, sticky="w", pady=5)
+        
+        width_var = tk.StringVar(value=str(current_width))
+        width_entry = ttk.Entry(
+            frame,
+            textvariable=width_var,
+            width=10,
+            style="Dark.TEntry"
+        )
+        width_entry.grid(row=0, column=1, pady=5, padx=(10, 0), sticky="ew")
+        
+        ttk.Label(
+            frame,
+            text="px",
+            style="Dark.TLabel"
+        ).grid(row=0, column=2, sticky="w", padx=(5, 0), pady=5)
+        
+        # Height field
+        ttk.Label(
+            frame,
+            text="Height:",
+            style="Dark.TLabel"
+        ).grid(row=1, column=0, sticky="w", pady=5)
+        
+        height_var = tk.StringVar(value=str(current_height))
+        height_entry = ttk.Entry(
+            frame,
+            textvariable=height_var,
+            width=10,
+            style="Dark.TEntry"
+        )
+        height_entry.grid(row=1, column=1, pady=5, padx=(10, 0), sticky="ew")
+        
+        ttk.Label(
+            frame,
+            text="px",
+            style="Dark.TLabel"
+        ).grid(row=1, column=2, sticky="w", padx=(5, 0), pady=5)
+        
+        # Preset buttons frame
+        preset_frame = ttk.Frame(frame, style="Dark.TFrame")
+        preset_frame.grid(row=2, column=0, columnspan=3, pady=(15, 10), sticky="ew")
+        
+        ttk.Label(
+            preset_frame,
+            text="Quick presets:",
+            style="Dark.TLabel"
+        ).pack(anchor="w", pady=(0, 5))
+        
+        presets = [
+            ("1280x720", 1280, 720),
+            ("1400x820", 1400, 820),
+            ("1600x900", 1600, 900),
+            ("1920x1080", 1920, 1080),
+        ]
+        
+        preset_btn_frame = ttk.Frame(preset_frame, style="Dark.TFrame")
+        preset_btn_frame.pack(fill="x")
+        
+        for i, (label, w, h) in enumerate(presets):
+            btn = ttk.Button(
+                preset_btn_frame,
+                text=label,
+                style="Dark.TButton",
+                command=lambda w=w, h=h: (width_var.set(str(w)), height_var.set(str(h)))
+            )
+            btn.pack(side="left", padx=(0, 5) if i < len(presets)-1 else 0)
+        
+        # Buttons frame
+        btn_frame = ttk.Frame(frame, style="Dark.TFrame")
+        btn_frame.grid(row=3, column=0, columnspan=3, pady=(10, 0), sticky="e")
+        
+        def apply_size():
+            try:
+                new_width = int(width_var.get())
+                new_height = int(height_var.get())
+                
+                # Validate reasonable bounds
+                if new_width < 800:
+                    error_msg = (
+                        f"Width validation failed\n\n"
+                        f"Entered value: {new_width} px\n"
+                        f"Minimum required: 800 px\n\n"
+                        f"Please enter a width of at least 800 pixels."
+                    )
+                    messagebox.showwarning("Invalid Size", error_msg, parent=dialog)
+                    return
+                if new_height < 600:
+                    error_msg = (
+                        f"Height validation failed\n\n"
+                        f"Entered value: {new_height} px\n"
+                        f"Minimum required: 600 px\n\n"
+                        f"Please enter a height of at least 600 pixels."
+                    )
+                    messagebox.showwarning("Invalid Size", error_msg, parent=dialog)
+                    return
+                if new_width > 4000 or new_height > 4000:
+                    error_msg = (
+                        f"Dimension validation failed\n\n"
+                        f"Entered dimensions: {new_width} x {new_height} px\n"
+                        f"Maximum allowed: 4000 x 4000 px\n\n"
+                        f"Please enter dimensions less than 4000 pixels."
+                    )
+                    messagebox.showwarning("Invalid Size", error_msg, parent=dialog)
+                    return
+                
+                # Apply new geometry (preserve position)
+                current_geom = self.geometry()
+                try:
+                    size_part, *pos_parts = current_geom.split('+')
+                    if len(pos_parts) >= 2:
+                        new_geom = f"{new_width}x{new_height}+{pos_parts[0]}+{pos_parts[1]}"
+                    else:
+                        new_geom = f"{new_width}x{new_height}"
+                except Exception:
+                    new_geom = f"{new_width}x{new_height}"
+                
+                self.geometry(new_geom)
+                
+                # Update settings
+                self.settings["window_geometry"] = new_geom
+                _safe_write_json(SETTINGS_FILE, self.settings)
+                
+                dialog.destroy()
+                messagebox.showinfo("Window Resized", f"Window size updated to {new_width}x{new_height}")
+                
+            except ValueError as e:
+                error_msg = (
+                    f"Invalid input format\n\n"
+                    f"Width entered: {width_var.get()}\n"
+                    f"Height entered: {height_var.get()}\n\n"
+                    f"Error: {str(e)}\n\n"
+                    f"Please enter valid numeric values for both width and height."
+                )
+                messagebox.showerror("Invalid Input", error_msg, parent=dialog)
+            except Exception as e:
+                error_msg = (
+                    f"Failed to resize window\n\n"
+                    f"Attempted size: {width_var.get()} x {height_var.get()}\n"
+                    f"Current geometry: {self.geometry()}\n\n"
+                    f"Error type: {type(e).__name__}\n"
+                    f"Error details: {str(e)}\n\n"
+                    f"Please try again or contact support with this error message."
+                )
+                messagebox.showerror("Error", error_msg, parent=dialog)
+        
+        ttk.Button(
+            btn_frame,
+            text="Apply",
+            style="Dark.TButton",
+            command=apply_size
+        ).pack(side="left", padx=(0, 5))
+        
+        ttk.Button(
+            btn_frame,
+            text="Cancel",
+            style="Dark.TButton",
+            command=dialog.destroy
+        ).pack(side="left")
+        
+        # Center the dialog on the main window
+        dialog.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() // 2) - (dialog.winfo_width() // 2)
+        y = self.winfo_y() + (self.winfo_height() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        # Make dialog modal
+        dialog.grab_set()
+        width_entry.focus_set()
+        width_entry.select_range(0, tk.END)
+
+    def _save_layout_defaults(self) -> None:
+        """Save current window geometry and pane sash positions into settings (without exiting)."""
+        try:
+            geom = None
+            try:
+                geom = self.geometry()
+            except Exception:
+                geom = None
+            if geom:
+                try:
+                    self.settings["window_geometry"] = geom
+                except Exception:
+                    pass
+
+            s = self.settings.setdefault("pane_sashes", {})
+            try:
+                if hasattr(self, "_pw_outer") and getattr(self, "_pw_outer"):
+                    try:
+                        s["outer"] = int(self._pw_outer.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_pw_left_split") and getattr(self, "_pw_left_split"):
+                    try:
+                        s["left_split"] = int(self._pw_left_split.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_pw_right_split") and getattr(self, "_pw_right_split"):
+                    try:
+                        s["right_split"] = int(self._pw_right_split.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_pw_right_bottom_split") and getattr(self, "_pw_right_bottom_split"):
+                    try:
+                        s["right_bottom_split"] = int(self._pw_right_bottom_split.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                self._save_settings()
+                try:
+                    messagebox.showinfo("Saved layout", "Saved current layout as the default.")
+                except Exception:
+                    pass
+            except Exception:
+                try:
+                    messagebox.showerror("Save failed", "Couldn't save layout settings.")
+                except Exception:
+                    pass
+        except Exception:
+            try:
+                messagebox.showerror("Save failed", "Couldn't save layout settings.")
+            except Exception:
+                pass
+
+        try:
+            self.destroy()
+        except Exception:
+            try:
+                self.quit()
+            except Exception:
+                pass
+
     def _settings_getter(self) -> dict:
         return self.settings
 
@@ -1991,6 +2383,18 @@ class PowerTraderHub(tk.Tk):
         m_scripts.add_command(label="Stop Trader", command=self.stop_trader)
         menubar.add_cascade(label="Scripts", menu=m_scripts)
 
+        m_layout = tk.Menu(
+            menubar,
+            tearoff=0,
+            bg=DARK_BG2,
+            fg=DARK_FG,
+            activebackground=DARK_SELECT_BG,
+            activeforeground=DARK_SELECT_FG,
+        )
+        m_layout.add_command(label="Save current layout as default", command=self._save_layout_defaults)
+        m_layout.add_command(label="Resize windows...", command=self._open_resize_dialog)
+        menubar.add_cascade(label="Layout", menu=m_layout)
+
         self.config(menu=menubar)
 
 
@@ -2031,18 +2435,21 @@ class PowerTraderHub(tk.Tk):
         outer.bind("<ButtonRelease-1>", lambda e: (
             setattr(self, "_user_moved_outer", True),
             self._schedule_paned_clamp(self._pw_outer),
+            self._schedule_save_sashes(),
         ))
 
         left_split.bind("<Configure>", lambda e: self._schedule_paned_clamp(self._pw_left_split))
         left_split.bind("<ButtonRelease-1>", lambda e: (
             setattr(self, "_user_moved_left_split", True),
             self._schedule_paned_clamp(self._pw_left_split),
+            self._schedule_save_sashes(),
         ))
 
         right_split.bind("<Configure>", lambda e: self._schedule_paned_clamp(self._pw_right_split))
         right_split.bind("<ButtonRelease-1>", lambda e: (
             setattr(self, "_user_moved_right_split", True),
             self._schedule_paned_clamp(self._pw_right_split),
+            self._schedule_save_sashes(),
         ))
 
         # Set a startup default width that matches the screenshot (so left has room for Neural Levels).
@@ -2055,6 +2462,16 @@ class PowerTraderHub(tk.Tk):
                 if getattr(self, "_user_moved_outer", False):
                     self._did_init_outer_sash = True
                     return
+
+                # If we saved a previous sash position, restore it now.
+                try:
+                    saved = self.settings.get("pane_sashes", {}).get("outer")
+                    if isinstance(saved, int):
+                        outer.sashpos(0, int(saved))
+                        self._did_init_outer_sash = True
+                        return
+                except Exception:
+                    pass
 
                 total = outer.winfo_width()
                 if total <= 2:
@@ -2080,6 +2497,7 @@ class PowerTraderHub(tk.Tk):
             self._schedule_paned_clamp(getattr(self, "_pw_left_split", None)),
             self._schedule_paned_clamp(getattr(self, "_pw_right_split", None)),
             self._schedule_paned_clamp(getattr(self, "_pw_right_bottom_split", None)),
+            self._schedule_save_sashes(),
         ))
 
 
@@ -2357,16 +2775,23 @@ class PowerTraderHub(tk.Tk):
         )
         self._neural_overview_canvas.grid(row=0, column=0, sticky="nsew")
 
+        # Horizontal scrollbar so tiles lay out left-to-right and remain accessible
         self._neural_overview_scroll = ttk.Scrollbar(
             neural_viewport,
-            orient="vertical",
-            command=self._neural_overview_canvas.yview,
+            orient="horizontal",
+            command=self._neural_overview_canvas.xview,
         )
-        self._neural_overview_scroll.grid(row=0, column=1, sticky="ns")
+        self._neural_overview_scroll.grid(row=1, column=0, sticky="ew")
 
-        self._neural_overview_canvas.configure(yscrollcommand=self._neural_overview_scroll.set)
+        self._neural_overview_canvas.configure(xscrollcommand=self._neural_overview_scroll.set)
 
-        self.neural_wrap = WrapFrame(self._neural_overview_canvas)
+        self.neural_wrap = WrapFrame(self._neural_overview_canvas, orientation="horizontal")
+        # For neural overview we prefer a single left-to-right row that scrolls
+        # horizontally rather than wrapping into multiple rows.
+        try:
+            self.neural_wrap._nowrap = True
+        except Exception:
+            pass
         self._neural_overview_window = self._neural_overview_canvas.create_window(
             (0, 0),
             window=self.neural_wrap,
@@ -2386,22 +2811,25 @@ class PowerTraderHub(tk.Tk):
                     return
 
                 c.configure(scrollregion=bbox)
-                content_h = int(bbox[3] - bbox[1])
-                view_h = int(c.winfo_height())
+                content_w = int(bbox[2] - bbox[0])
+                view_w = int(c.winfo_width())
 
-                if content_h > (view_h + 1):
-                    self._neural_overview_scroll.grid()
-                else:
-                    self._neural_overview_scroll.grid_remove()
+                if content_w > (view_w + 1):
                     try:
-                        c.yview_moveto(0)
+                        self._neural_overview_scroll.grid()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        self._neural_overview_scroll.grid_remove()
+                        c.xview_moveto(0)
                     except Exception:
                         pass
             except Exception:
                 pass
 
         def _on_neural_canvas_configure(e) -> None:
-            # Keep the inner wrap frame exactly the canvas width so wrapping is correct.
+            # Keep the inner wrap frame exactly the canvas width so wrapping works.
             try:
                 self._neural_overview_canvas.itemconfigure(self._neural_overview_window, width=int(e.width))
             except Exception:
@@ -2416,7 +2844,8 @@ class PowerTraderHub(tk.Tk):
         def _wheel(e):
             try:
                 if self._neural_overview_scroll.winfo_ismapped():
-                    self._neural_overview_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                    # Scroll horizontally with mouse wheel
+                    self._neural_overview_canvas.xview_scroll(int(-1 * (e.delta / 120)), "units")
             except Exception:
                 pass
 
@@ -2562,14 +2991,14 @@ class PowerTraderHub(tk.Tk):
         self.trainer_text.bind("<Button-5>", lambda e: _on_mousewheel(e, self.trainer_text))  # Linux scroll down
 
         # Add left panes (no trades/history on the left anymore)
-        # Default should match the screenshot: more room for Controls/Health + Neural Levels.
-        left_split.add(top_controls, weight=1)
+        # Live Output pane uses a smaller share so it doesn't dominate the left column.
+        left_split.add(top_controls, weight=2)
         left_split.add(logs_frame, weight=1)
 
         try:
             # Ensure the top pane can't start (or be clamped) too small to show Neural Levels.
             left_split.paneconfigure(top_controls, minsize=360)
-            left_split.paneconfigure(logs_frame, minsize=220)
+            left_split.paneconfigure(logs_frame, minsize=140)
         except Exception:
             pass
 
@@ -2583,16 +3012,26 @@ class PowerTraderHub(tk.Tk):
                     self._did_init_left_split_sash = True
                     return
 
+                # Restore saved sash position for left_split if present
+                try:
+                    saved = self.settings.get("pane_sashes", {}).get("left_split")
+                    if isinstance(saved, int):
+                        left_split.sashpos(0, int(saved))
+                        self._did_init_left_split_sash = True
+                        return
+                except Exception:
+                    pass
+
                 total = left_split.winfo_height()
                 if total <= 2:
                     self.after(10, _init_left_split_sash_once)
                     return
 
                 min_top = 360
-                min_bottom = 220
+                min_bottom = 140
 
-                # Match screenshot feel: keep Live Output ~260px high, give the rest to top.
-                desired_bottom = 260
+                # Prefer a smaller Live Output bottom pane by default.
+                desired_bottom = 180
                 target = total - max(min_bottom, desired_bottom)
                 target = max(min_top, min(total - min_bottom, target))
 
@@ -2614,15 +3053,56 @@ class PowerTraderHub(tk.Tk):
         charts_frame = ttk.LabelFrame(right_split, text="Charts (Neural lines overlaid)")
         self._charts_frame = charts_frame
 
-        # Multi-row "tabs" (WrapFrame)
-        self.chart_tabs_bar = WrapFrame(charts_frame)
-        # Keep left padding, remove right padding so tabs can reach the edge
-        self.chart_tabs_bar.pack(fill="x", padx=(6, 0), pady=(6, 0))
-
         # Page container (no ttk.Notebook, so there are NO native tabs to show)
         self.chart_pages_container = ttk.Frame(charts_frame)
         # Keep left padding, remove right padding so charts fill to the edge
-        self.chart_pages_container.pack(fill="both", expand=True, padx=(6, 0), pady=(0, 6))
+        self.chart_pages_container.pack(fill="both", expand=True, padx=(6, 0), pady=(6, 0))
+
+        # Tabs bar: horizontally-scrollable area so tabs remain visible when many coins
+        tabs_viewport = ttk.Frame(charts_frame)
+        tabs_viewport.pack(fill="x", padx=(6, 0), pady=(0, 6))
+
+        tabs_canvas = tk.Canvas(tabs_viewport, height=36, bg=DARK_BG, highlightthickness=0, bd=0)
+        tabs_canvas.pack(side="top", fill="x", expand=True)
+
+        tabs_scroll = ttk.Scrollbar(tabs_viewport, orient="horizontal", command=tabs_canvas.xview)
+        tabs_canvas.configure(xscrollcommand=tabs_scroll.set)
+
+        # WrapFrame lives inside the canvas so it can scroll horizontally
+        self.chart_tabs_bar = WrapFrame(tabs_canvas, orientation="horizontal")
+        tabs_window = tabs_canvas.create_window((0, 0), window=self.chart_tabs_bar, anchor="nw")
+
+        def _update_tabs_scrollbars(event=None) -> None:
+            try:
+                c = tabs_canvas
+                win_id = tabs_window
+                c.update_idletasks()
+                bbox = c.bbox(win_id)
+                if not bbox:
+                    try:
+                        tabs_scroll.pack_forget()
+                    except Exception:
+                        pass
+                    return
+                c.configure(scrollregion=bbox)
+                content_w = int(bbox[2] - bbox[0])
+                view_w = int(c.winfo_width())
+                if content_w > (view_w + 1):
+                    try:
+                        tabs_scroll.pack(side="bottom", fill="x")
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        tabs_scroll.pack_forget()
+                        c.xview_moveto(0)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        self.chart_tabs_bar.bind("<Configure>", _update_tabs_scrollbars, add="+")
+        tabs_canvas.bind("<Configure>", lambda e: (tabs_canvas.itemconfigure(tabs_window, width=int(e.width)), _update_tabs_scrollbars()), add="+")
 
 
         self._chart_tab_buttons: Dict[str, ttk.Button] = {}
@@ -2747,6 +3227,7 @@ class PowerTraderHub(tk.Tk):
         right_bottom_split.bind("<ButtonRelease-1>", lambda e: (
             setattr(self, "_user_moved_right_bottom_split", True),
             self._schedule_paned_clamp(self._pw_right_bottom_split),
+            self._schedule_save_sashes(),
         ))
 
         # Current trades (top)
@@ -2870,12 +3351,10 @@ class PowerTraderHub(tk.Tk):
             activestyle="none",
         )
         ysb2 = ttk.Scrollbar(hist_wrap, orient="vertical", command=self.hist_list.yview)
-        xsb2 = ttk.Scrollbar(hist_wrap, orient="horizontal", command=self.hist_list.xview)
-        self.hist_list.configure(yscrollcommand=ysb2.set, xscrollcommand=xsb2.set)
+        self.hist_list.configure(yscrollcommand=ysb2.set)
 
         self.hist_list.pack(side="left", fill="both", expand=True)
         ysb2.pack(side="right", fill="y")
-        xsb2.pack(side="bottom", fill="x")
 
 
         # Assemble right side
@@ -2908,6 +3387,16 @@ class PowerTraderHub(tk.Tk):
                     self._did_init_right_split_sash = True
                     return
 
+                # Restore saved sash position for right_split if present
+                try:
+                    saved = self.settings.get("pane_sashes", {}).get("right_split")
+                    if isinstance(saved, int):
+                        right_split.sashpos(0, int(saved))
+                        self._did_init_right_split_sash = True
+                        return
+                except Exception:
+                    pass
+
                 total = right_split.winfo_height()
                 if total <= 2:
                     self.after(10, _init_right_split_sash_once)
@@ -2931,6 +3420,16 @@ class PowerTraderHub(tk.Tk):
                 if getattr(self, "_user_moved_right_bottom_split", False):
                     self._did_init_right_bottom_split_sash = True
                     return
+
+                # Restore saved sash position for right_bottom_split if present
+                try:
+                    saved = self.settings.get("pane_sashes", {}).get("right_bottom_split")
+                    if isinstance(saved, int):
+                        right_bottom_split.sashpos(0, int(saved))
+                        self._did_init_right_bottom_split_sash = True
+                        return
+                except Exception:
+                    pass
 
                 total = right_bottom_split.winfo_height()
                 if total <= 2:
@@ -2957,6 +3456,14 @@ class PowerTraderHub(tk.Tk):
             self._schedule_paned_clamp(getattr(self, "_pw_right_split", None)),
             self._schedule_paned_clamp(getattr(self, "_pw_right_bottom_split", None)),
         ))
+
+        # Apply saved layout explicitly once everything is up; this ensures sash
+        # positions are restored and that canvases (charts, neural overview)
+        # receive a final resize/redraw so sizes actually persist visually.
+        try:
+            self.after_idle(self._apply_saved_layout)
+        except Exception:
+            pass
 
 
         # status bar
@@ -3065,6 +3572,263 @@ class PowerTraderHub(tk.Tk):
                         except Exception:
                             pass
 
+
+        except Exception:
+            pass
+
+
+    def _schedule_save_sashes(self, delay: int = 700) -> None:
+        """Debounced save of current sash positions to settings file."""
+        try:
+            if getattr(self, "_save_sash_after_id", None):
+                try:
+                    self.after_cancel(self._save_sash_after_id)
+                except Exception:
+                    pass
+
+            def _do_save():
+                try:
+                    self._save_current_sashes()
+                except Exception:
+                    pass
+
+            try:
+                self._save_sash_after_id = self.after(int(delay), _do_save)
+            except Exception:
+                try:
+                    _do_save()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
+    def _save_current_sashes(self) -> None:
+        """Read current sash positions and write them to settings immediately."""
+        try:
+            s = self.settings.setdefault("pane_sashes", {})
+
+            try:
+                if hasattr(self, "_pw_outer") and getattr(self, "_pw_outer"):
+                    try:
+                        s["outer"] = int(self._pw_outer.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                if hasattr(self, "_pw_left_split") and getattr(self, "_pw_left_split"):
+                    try:
+                        s["left_split"] = int(self._pw_left_split.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                if hasattr(self, "_pw_right_split") and getattr(self, "_pw_right_split"):
+                    try:
+                        s["right_split"] = int(self._pw_right_split.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                if hasattr(self, "_pw_right_bottom_split") and getattr(self, "_pw_right_bottom_split"):
+                    try:
+                        s["right_bottom_split"] = int(self._pw_right_bottom_split.sashpos(0))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                self._save_settings()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+    def _read_current_sashes(self) -> dict:
+        """Return a dict of current sash positions for the main panedwindows."""
+        out = {}
+        try:
+            try:
+                if hasattr(self, "_pw_outer") and getattr(self, "_pw_outer"):
+                    out["outer"] = int(self._pw_outer.sashpos(0))
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_pw_left_split") and getattr(self, "_pw_left_split"):
+                    out["left_split"] = int(self._pw_left_split.sashpos(0))
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_pw_right_split") and getattr(self, "_pw_right_split"):
+                    out["right_split"] = int(self._pw_right_split.sashpos(0))
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_pw_right_bottom_split") and getattr(self, "_pw_right_bottom_split"):
+                    out["right_bottom_split"] = int(self._pw_right_bottom_split.sashpos(0))
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return out
+
+
+    def _ensure_outer_sash_restored(self, saved_outer: int, attempts: int = 4, delay_ms: int = 120) -> None:
+        """Try to apply the saved outer sash position several times as layout settles.
+
+        Some platforms report sash events on internal widgets; restoring immediately
+        can race with geometry management. Retry a few times with delays.
+        """
+        try:
+            if not isinstance(saved_outer, int):
+                return
+
+            def _try_set(i: int = 0):
+                try:
+                    if not (hasattr(self, "_pw_outer") and getattr(self, "_pw_outer") and int(self._pw_outer.winfo_exists())):
+                        # schedule next attempt
+                        if i + 1 < attempts:
+                            self.after(delay_ms, lambda: _try_set(i + 1))
+                        return
+
+                    total = self._pw_outer.winfo_width()
+                    if total and int(total) > 2:
+                        try:
+                            self._pw_outer.sashpos(0, int(saved_outer))
+                        except Exception:
+                            pass
+
+                    # also clamp to enforce minsize
+                    try:
+                        self._schedule_paned_clamp(self._pw_outer)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+                if i + 1 < attempts:
+                    try:
+                        self.after(delay_ms, lambda: _try_set(i + 1))
+                    except Exception:
+                        pass
+
+            try:
+                self.after(10, lambda: _try_set(0))
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+    def _apply_saved_layout(self) -> None:
+        """Apply saved sash positions and trigger canvas redraws so sizes persist."""
+        try:
+            s = self.settings.get("pane_sashes", {}) or {}
+
+            try:
+                outer_saved = s.get("outer")
+                if isinstance(outer_saved, int) and hasattr(self, "_pw_outer") and getattr(self, "_pw_outer"):
+                    try:
+                        self._pw_outer.sashpos(0, int(outer_saved))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                left_saved = s.get("left_split")
+                if isinstance(left_saved, int) and hasattr(self, "_pw_left_split") and getattr(self, "_pw_left_split"):
+                    try:
+                        self._pw_left_split.sashpos(0, int(left_saved))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                right_saved = s.get("right_split")
+                if isinstance(right_saved, int) and hasattr(self, "_pw_right_split") and getattr(self, "_pw_right_split"):
+                    try:
+                        self._pw_right_split.sashpos(0, int(right_saved))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                rb_saved = s.get("right_bottom_split")
+                if isinstance(rb_saved, int) and hasattr(self, "_pw_right_bottom_split") and getattr(self, "_pw_right_bottom_split"):
+                    try:
+                        self._pw_right_bottom_split.sashpos(0, int(rb_saved))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Let geometry settle then force canvases to recompute and redraw
+            try:
+                self.update_idletasks()
+            except Exception:
+                pass
+
+            # Ensure outer sash is applied robustly: schedule a few retries
+            try:
+                if isinstance(outer_saved, int):
+                    try:
+                        self._ensure_outer_sash_restored(int(outer_saved))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Refresh charts
+            try:
+                if getattr(self, "charts", None):
+                    for c in list(self.charts.values()):
+                        try:
+                            w = c.canvas.get_tk_widget()
+                            w.update_idletasks()
+                            try:
+                                c.canvas.draw_idle()
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # Account chart
+            try:
+                if getattr(self, "account_chart", None):
+                    try:
+                        w = self.account_chart.canvas.get_tk_widget()
+                        w.update_idletasks()
+                        try:
+                            self.account_chart.canvas.draw_idle()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Neural overview scrollregion update
+            try:
+                if getattr(self, "_update_neural_overview_scrollbars", None):
+                    try:
+                        self._update_neural_overview_scrollbars()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
         except Exception:
             pass
@@ -3216,11 +3980,15 @@ class PowerTraderHub(tk.Tk):
     def start_all_scripts(self) -> None:
         # Enforce flow: Train → Neural → (wait for runner READY) → Trader
         all_trained = all(self._coin_is_trained(c) for c in self.coins) if self.coins else False
+        
         if not all_trained:
-            messagebox.showwarning(
-                "Training required",
-                "All coins must be trained before starting Neural Runner.\n\nUse Train All first."
+            # Start training first automatically
+            messagebox.showinfo(
+                "Starting Training",
+                "Not all coins are trained. Starting training now.\n\nAfter training completes, Neural Runner and Trader will start automatically."
             )
+            self._auto_start_runner_after_training = True
+            self.train_all_coins()
             return
 
         self._auto_start_trader_pending = True
@@ -3642,6 +4410,22 @@ class PowerTraderHub(tk.Tk):
         except Exception:
             pass
 
+        # Periodically detect sash position changes and persist them.
+        try:
+            try:
+                current = self._read_current_sashes()
+                if current and current != getattr(self, "_last_saved_sashes", {}):
+                    try:
+                        # Update snapshot and save
+                        self._last_saved_sashes = dict(current)
+                        self._save_current_sashes()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     # ---- refresh loop ----
     def _drain_queue_to_text(self, q: "queue.Queue[str]", txt: tk.Text, max_lines: int = 2500) -> None:
 
@@ -3717,6 +4501,16 @@ class PowerTraderHub(tk.Tk):
         # --- flow gating: Train -> Start All ---
         status_map = self._training_status_map()
         all_trained = all(v == "TRAINED" for v in status_map.values()) if status_map else False
+
+        # Auto-start runner after training completes if flag is set
+        if all_trained and self._auto_start_runner_after_training:
+            self._auto_start_runner_after_training = False
+            self._auto_start_trader_pending = True
+            self.start_neural()
+            try:
+                self.after(250, self._poll_runner_ready_then_start_trader)
+            except Exception:
+                pass
 
         # Disable Start All until training is done (but always allow it if something is already running/pending,
         # so the user can still stop everything).
@@ -4485,11 +5279,52 @@ class PowerTraderHub(tk.Tk):
             pass
 
         # Recreate
-        self.chart_tabs_bar = WrapFrame(charts_frame)
-        self.chart_tabs_bar.pack(fill="x", padx=6, pady=(6, 0))
-
         self.chart_pages_container = ttk.Frame(charts_frame)
-        self.chart_pages_container.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.chart_pages_container.pack(fill="both", expand=True, padx=6, pady=(6, 0))
+
+        tabs_viewport = ttk.Frame(charts_frame)
+        tabs_viewport.pack(fill="x", padx=6, pady=(0, 6))
+
+        tabs_canvas = tk.Canvas(tabs_viewport, height=36, bg=DARK_BG, highlightthickness=0, bd=0)
+        tabs_canvas.pack(side="top", fill="x", expand=True)
+
+        tabs_scroll = ttk.Scrollbar(tabs_viewport, orient="horizontal", command=tabs_canvas.xview)
+        tabs_canvas.configure(xscrollcommand=tabs_scroll.set)
+
+        self.chart_tabs_bar = WrapFrame(tabs_canvas, orientation="horizontal")
+        tabs_window = tabs_canvas.create_window((0, 0), window=self.chart_tabs_bar, anchor="nw")
+
+        def _update_tabs_scrollbars(event=None) -> None:
+            try:
+                c = tabs_canvas
+                win_id = tabs_window
+                c.update_idletasks()
+                bbox = c.bbox(win_id)
+                if not bbox:
+                    try:
+                        tabs_scroll.pack_forget()
+                    except Exception:
+                        pass
+                    return
+                c.configure(scrollregion=bbox)
+                content_w = int(bbox[2] - bbox[0])
+                view_w = int(c.winfo_width())
+                if content_w > (view_w + 1):
+                    try:
+                        tabs_scroll.pack(side="bottom", fill="x")
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        tabs_scroll.pack_forget()
+                        c.xview_moveto(0)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        self.chart_tabs_bar.bind("<Configure>", _update_tabs_scrollbars, add="+")
+        tabs_canvas.bind("<Configure>", lambda e: (tabs_canvas.itemconfigure(tabs_window, width=int(e.width)), _update_tabs_scrollbars()), add="+")
 
         self._chart_tab_buttons = {}
         self.chart_pages = {}
@@ -4768,6 +5603,11 @@ class PowerTraderHub(tk.Tk):
             return k, s, p
 
         api_status_var = tk.StringVar(value="")
+        kucoin_status_var = tk.StringVar(value="")
+        binance_status_var = tk.StringVar(value="")
+        kraken_status_var = tk.StringVar(value="")
+        coinbase_status_var = tk.StringVar(value="")
+        bybit_status_var = tk.StringVar(value="")
 
         def _refresh_api_status() -> None:
             key_path, secret_path = _api_paths()
@@ -5138,6 +5978,12 @@ class PowerTraderHub(tk.Tk):
             api_ent.grid(row=1, column=0, sticky="ew", padx=10, pady=(6, 10))
 
             def _test_credentials() -> None:
+                try:
+                    wiz.lift()
+                    wiz.focus_force()
+                    wiz.attributes("-topmost", True)
+                except Exception:
+                    pass
                 api_key = (api_key_var.get() or "").strip()
                 priv_b64 = (private_b64_state.get("value") or "").strip()
 
@@ -5225,6 +6071,11 @@ class PowerTraderHub(tk.Tk):
                     )
                 except Exception as e:
                     messagebox.showerror("Test failed", f"Couldn't reach Robinhood.\n\nError:\n{e}")
+                finally:
+                    try:
+                        wiz.attributes("-topmost", False)
+                    except Exception:
+                        pass
 
             step2_btns = ttk.Frame(step2)
             step2_btns.grid(row=2, column=0, sticky="w", padx=10, pady=(0, 10))
@@ -5401,6 +6252,20 @@ class PowerTraderHub(tk.Tk):
                 s = ""
             return k, s
 
+        def _refresh_binance_status() -> None:
+            k, s = _read_binance_files()
+            try:
+                enabled = bool(binance_enabled_var.get())
+            except Exception:
+                enabled = bool(self.settings.get("exchange_binance_enabled", False))
+
+            if k and s and enabled:
+                binance_status_var.set("Configured")
+            elif k or s:
+                binance_status_var.set("Partial credentials")
+            else:
+                binance_status_var.set("")
+
         def _open_binance_api_wizard() -> None:
             """Binance API setup wizard."""
             wiz = tk.Toplevel(win)
@@ -5485,7 +6350,23 @@ class PowerTraderHub(tk.Tk):
             )
             ttk.Label(frm, text=intro_text, justify="left", wraplength=850).pack(fill="x", pady=(0, 12))
 
+            # Step 1 — where to create keys
+            step1 = ttk.LabelFrame(frm, text="Step 1 — Create API credentials (website)")
+            step1.pack(fill="x", pady=(0, 8))
+            ttk.Label(step1, text="Create an API key on Binance and copy the API Key + Secret.").grid(row=0, column=0, sticky="w", padx=10, pady=6)
+            def _open_binance_page():
+                try:
+                    import webbrowser
+                    webbrowser.open("https://www.binance.com/en/my/settings/api-management")
+                except Exception:
+                    pass
+            ttk.Button(step1, text="Open Binance API page", command=_open_binance_page).grid(row=0, column=1, sticky="e", padx=10)
+
             ttk.Separator(frm, orient="horizontal").pack(fill="x", pady=8)
+
+            # Step 2 — paste keys
+            step2 = ttk.LabelFrame(frm, text="Step 2 — Paste your API Key and Secret")
+            step2.pack(fill="both", expand=False, pady=(0, 10), padx=2)
 
             key_var = tk.StringVar(value="")
             secret_var = tk.StringVar(value="")
@@ -5494,14 +6375,22 @@ class PowerTraderHub(tk.Tk):
             key_var.set(bk)
             secret_var.set(bs)
 
-            row_frm = ttk.Frame(frm)
+            row_frm = ttk.Frame(step2)
             row_frm.pack(fill="x", pady=6)
             row_frm.columnconfigure(1, weight=1)
 
             ttk.Label(row_frm, text="API Key:").grid(row=0, column=0, sticky="w", padx=(0, 8))
-            ttk.Entry(row_frm, textvariable=key_var, width=60).grid(row=0, column=1, sticky="ew")
+            key_ent = ttk.Entry(row_frm, textvariable=key_var, width=60, show="*")
+            key_ent.grid(row=0, column=1, sticky="ew")
+            key_reveal = tk.BooleanVar(value=False)
+            def _toggle_kraken_key():
+                try:
+                    key_ent.configure(show="" if key_reveal.get() else "*")
+                except Exception:
+                    pass
+            ttk.Checkbutton(row_frm, text="Reveal", variable=key_reveal, command=_toggle_kraken_key).grid(row=0, column=2, padx=(8,0))
 
-            row_frm2 = ttk.Frame(frm)
+            row_frm2 = ttk.Frame(step2)
             row_frm2.pack(fill="x", pady=6)
             row_frm2.columnconfigure(1, weight=1)
 
@@ -5510,10 +6399,20 @@ class PowerTraderHub(tk.Tk):
 
             def do_test():
                 try:
+                    try:
+                        wiz.lift()
+                        wiz.focus_force()
+                        wiz.attributes("-topmost", True)
+                    except Exception:
+                        pass
                     import requests
                     k, s = key_var.get().strip(), secret_var.get().strip()
                     if not k or not s:
                         messagebox.showwarning("Missing credentials", "Please enter both API Key and Secret.")
+                        try:
+                            wiz.attributes("-topmost", False)
+                        except Exception:
+                            pass
                         return
                     # Test public endpoint (no auth needed)
                     resp = requests.get("https://api.binance.com/api/v3/time", timeout=5)
@@ -5523,6 +6422,11 @@ class PowerTraderHub(tk.Tk):
                         messagebox.showwarning("Test failed", f"Binance returned: {resp.status_code}")
                 except Exception as e:
                     messagebox.showerror("Test error", f"Connection test failed:\n{e}")
+                finally:
+                    try:
+                        wiz.attributes("-topmost", False)
+                    except Exception:
+                        pass
 
             def do_save():
                 try:
@@ -5541,8 +6445,10 @@ class PowerTraderHub(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Save failed", f"Couldn't save credentials:\n{e}")
 
-            btns = ttk.Frame(frm)
-            btns.pack(fill="x", pady=(12, 0))
+            step3 = ttk.LabelFrame(frm, text="Step 3 — Save to files (required)")
+            step3.pack(fill="x", pady=(12, 0))
+            btns = ttk.Frame(step3)
+            btns.pack(fill="x", pady=(6, 0))
             ttk.Button(btns, text="Test", command=do_test).pack(side="left", padx=4)
             ttk.Button(btns, text="Save", command=do_save).pack(side="left", padx=4)
             ttk.Button(btns, text="Close", command=wiz.destroy).pack(side="left", padx=4)
@@ -5565,6 +6471,20 @@ class PowerTraderHub(tk.Tk):
             except Exception:
                 s = ""
             return k, s
+
+        def _refresh_kraken_status() -> None:
+            k, s = _read_kraken_files()
+            try:
+                enabled = bool(kraken_enabled_var.get())
+            except Exception:
+                enabled = bool(self.settings.get("exchange_kraken_enabled", False))
+
+            if k and s and enabled:
+                kraken_status_var.set("Configured")
+            elif k or s:
+                kraken_status_var.set("Partial credentials")
+            else:
+                kraken_status_var.set("")
 
         def _open_kraken_api_wizard() -> None:
             """Kraken API setup wizard."""
@@ -5671,14 +6591,32 @@ class PowerTraderHub(tk.Tk):
             row_frm2.columnconfigure(1, weight=1)
 
             ttk.Label(row_frm2, text="Private Key:").grid(row=0, column=0, sticky="w", padx=(0, 8))
-            ttk.Entry(row_frm2, textvariable=secret_var, width=60, show="*").grid(row=0, column=1, sticky="ew")
+            secret_ent = ttk.Entry(row_frm2, textvariable=secret_var, width=60, show="*")
+            secret_ent.grid(row=0, column=1, sticky="ew")
+            secret_reveal = tk.BooleanVar(value=False)
+            def _toggle_kraken_secret():
+                try:
+                    secret_ent.configure(show="" if secret_reveal.get() else "*")
+                except Exception:
+                    pass
+            ttk.Checkbutton(row_frm2, text="Reveal", variable=secret_reveal, command=_toggle_kraken_secret).grid(row=0, column=2, padx=(8,0))
 
             def do_test():
                 try:
+                    try:
+                        wiz.lift()
+                        wiz.focus_force()
+                        wiz.attributes("-topmost", True)
+                    except Exception:
+                        pass
                     import requests
                     k, s = key_var.get().strip(), secret_var.get().strip()
                     if not k or not s:
                         messagebox.showwarning("Missing credentials", "Please enter both API Key and Private Key.")
+                        try:
+                            wiz.attributes("-topmost", False)
+                        except Exception:
+                            pass
                         return
                     # Test public endpoint
                     resp = requests.get("https://api.kraken.com/0/public/Time", timeout=5)
@@ -5688,6 +6626,11 @@ class PowerTraderHub(tk.Tk):
                         messagebox.showwarning("Test failed", f"Kraken returned: {resp.status_code}")
                 except Exception as e:
                     messagebox.showerror("Test error", f"Connection test failed:\n{e}")
+                finally:
+                    try:
+                        wiz.attributes("-topmost", False)
+                    except Exception:
+                        pass
 
             def do_save():
                 try:
@@ -5706,8 +6649,10 @@ class PowerTraderHub(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Save failed", f"Couldn't save credentials:\n{e}")
 
-            btns = ttk.Frame(frm)
-            btns.pack(fill="x", pady=(12, 0))
+            step3 = ttk.LabelFrame(frm, text="Step 3 — Save to files (required)")
+            step3.pack(fill="x", pady=(12, 0))
+            btns = ttk.Frame(step3)
+            btns.pack(fill="x", pady=(6, 0))
             ttk.Button(btns, text="Test", command=do_test).pack(side="left", padx=4)
             ttk.Button(btns, text="Save", command=do_save).pack(side="left", padx=4)
             ttk.Button(btns, text="Close", command=wiz.destroy).pack(side="left", padx=4)
@@ -5730,6 +6675,20 @@ class PowerTraderHub(tk.Tk):
             except Exception:
                 s = ""
             return k, s
+
+        def _refresh_coinbase_status() -> None:
+            k, s = _read_coinbase_files()
+            try:
+                enabled = bool(coinbase_enabled_var.get())
+            except Exception:
+                enabled = bool(self.settings.get("exchange_coinbase_enabled", False))
+
+            if k and s and enabled:
+                coinbase_status_var.set("Configured")
+            elif k or s:
+                coinbase_status_var.set("Partial credentials")
+            else:
+                coinbase_status_var.set("")
 
         def _open_coinbase_api_wizard() -> None:
             """Coinbase API setup wizard."""
@@ -5841,10 +6800,20 @@ class PowerTraderHub(tk.Tk):
 
             def do_test():
                 try:
+                    try:
+                        wiz.lift()
+                        wiz.focus_force()
+                        wiz.attributes("-topmost", True)
+                    except Exception:
+                        pass
                     import requests
                     k, s = key_var.get().strip(), secret_var.get().strip()
                     if not k or not s:
                         messagebox.showwarning("Missing credentials", "Please enter both API Key and Secret.")
+                        try:
+                            wiz.attributes("-topmost", False)
+                        except Exception:
+                            pass
                         return
                     # Test public endpoint
                     resp = requests.get("https://api.coinbase.com/v2/exchange-rates?currency=USD", timeout=5)
@@ -5854,6 +6823,11 @@ class PowerTraderHub(tk.Tk):
                         messagebox.showwarning("Test failed", f"Coinbase returned: {resp.status_code}")
                 except Exception as e:
                     messagebox.showerror("Test error", f"Connection test failed:\n{e}")
+                finally:
+                    try:
+                        wiz.attributes("-topmost", False)
+                    except Exception:
+                        pass
 
             def do_save():
                 try:
@@ -5896,6 +6870,20 @@ class PowerTraderHub(tk.Tk):
             except Exception:
                 s = ""
             return k, s
+
+        def _refresh_bybit_status() -> None:
+            k, s = _read_bybit_files()
+            try:
+                enabled = bool(bybit_enabled_var.get())
+            except Exception:
+                enabled = bool(self.settings.get("exchange_bybit_enabled", False))
+
+            if k and s and enabled:
+                bybit_status_var.set("Configured")
+            elif k or s:
+                bybit_status_var.set("Partial credentials")
+            else:
+                bybit_status_var.set("")
 
         def _open_bybit_api_wizard() -> None:
             """Bybit API setup wizard."""
@@ -6007,10 +6995,20 @@ class PowerTraderHub(tk.Tk):
 
             def do_test():
                 try:
+                    try:
+                        wiz.lift()
+                        wiz.focus_force()
+                        wiz.attributes("-topmost", True)
+                    except Exception:
+                        pass
                     import requests
                     k, s = key_var.get().strip(), secret_var.get().strip()
                     if not k or not s:
                         messagebox.showwarning("Missing credentials", "Please enter both API Key and Secret Key.")
+                        try:
+                            wiz.attributes("-topmost", False)
+                        except Exception:
+                            pass
                         return
                     # Test public endpoint
                     resp = requests.get("https://api.bybit.com/v5/market/time", timeout=5)
@@ -6020,6 +7018,11 @@ class PowerTraderHub(tk.Tk):
                         messagebox.showwarning("Test failed", f"Bybit returned: {resp.status_code}")
                 except Exception as e:
                     messagebox.showerror("Test error", f"Connection test failed:\n{e}")
+                finally:
+                    try:
+                        wiz.attributes("-topmost", False)
+                    except Exception:
+                        pass
 
             def do_save():
                 try:
@@ -6128,9 +7131,29 @@ class PowerTraderHub(tk.Tk):
                     try:
                         m = Market()
                         ticks = m.get_tickers()
-                        messagebox.showinfo("Success", "Public market request succeeded (kucoin package OK).")
+                        try:
+                            wiz.lift()
+                            wiz.focus_force()
+                            wiz.attributes("-topmost", True)
+                        except Exception:
+                            pass
+                        messagebox.showinfo("Success", "Public market request succeeded (kucoin package OK).", parent=wiz)
+                        try:
+                            wiz.attributes("-topmost", False)
+                        except Exception:
+                            pass
                     except Exception as e:
-                        messagebox.showerror("Test failed", f"KuCoin test request failed:\n{e}")
+                        try:
+                            wiz.lift()
+                            wiz.focus_force()
+                            wiz.attributes("-topmost", True)
+                        except Exception:
+                            pass
+                        messagebox.showerror("Test failed", f"KuCoin test request failed:\n{e}", parent=wiz)
+                        try:
+                            wiz.attributes("-topmost", False)
+                        except Exception:
+                            pass
 
                 ttk.Button(btns2, text="Save", command=do_save_kucoin).pack(side="left")
                 ttk.Button(btns2, text="Test (public)", command=do_test_kucoin).pack(side="left", padx=8)
@@ -6155,6 +7178,7 @@ class PowerTraderHub(tk.Tk):
                 messagebox.showinfo("Success", "Robinhood credential files cleared.")
             except Exception as e:
                 messagebox.showerror("Error", f"Could not clear Robinhood files: {e}")
+            _refresh_api_status()
         
         def _clear_kucoin_files():
             try:
@@ -6179,6 +7203,10 @@ class PowerTraderHub(tk.Tk):
                 messagebox.showinfo("Success", "Binance credential files cleared.")
             except Exception as e:
                 messagebox.showerror("Error", f"Could not clear Binance files: {e}")
+            try:
+                _refresh_binance_status()
+            except Exception:
+                pass
         
         def _clear_kraken_files():
             try:
@@ -6191,6 +7219,10 @@ class PowerTraderHub(tk.Tk):
                 messagebox.showinfo("Success", "Kraken credential files cleared.")
             except Exception as e:
                 messagebox.showerror("Error", f"Could not clear Kraken files: {e}")
+            try:
+                _refresh_kraken_status()
+            except Exception:
+                pass
         
         def _clear_coinbase_files():
             try:
@@ -6203,6 +7235,10 @@ class PowerTraderHub(tk.Tk):
                 messagebox.showinfo("Success", "Coinbase credential files cleared.")
             except Exception as e:
                 messagebox.showerror("Error", f"Could not clear Coinbase files: {e}")
+            try:
+                _refresh_coinbase_status()
+            except Exception:
+                pass
         
         def _clear_bybit_files():
             try:
@@ -6215,6 +7251,10 @@ class PowerTraderHub(tk.Tk):
                 messagebox.showinfo("Success", "Bybit credential files cleared.")
             except Exception as e:
                 messagebox.showerror("Error", f"Could not clear Bybit files: {e}")
+            try:
+                _refresh_bybit_status()
+            except Exception:
+                pass
         
         # Robinhood API row
         ttk.Label(frm, text="Robinhood API:").grid(row=r, column=0, sticky="w", padx=(0, 10), pady=6)
@@ -6229,6 +7269,8 @@ class PowerTraderHub(tk.Tk):
         robinhood_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
         robinhood_label = ttk.Label(robinhood_row, text="Crypto trading", foreground=DARK_MUTED)
         robinhood_label.grid(row=0, column=2, sticky="w")
+        robinhood_status_lbl = ttk.Label(robinhood_row, textvariable=api_status_var, foreground=DARK_MUTED)
+        robinhood_status_lbl.grid(row=0, column=5, sticky="e", padx=(8, 0))
         robinhood_open_btn = ttk.Button(robinhood_row, text="Open Folder", command=lambda: _open_in_file_manager(self.project_dir))
         robinhood_open_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
         robinhood_clear_btn = ttk.Button(robinhood_row, text="Clear", command=_clear_robinhood_files)
@@ -6249,6 +7291,8 @@ class PowerTraderHub(tk.Tk):
         kucoin_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
         kucoin_label = ttk.Label(kucoin_row, text="Market data & trading", foreground=DARK_MUTED)
         kucoin_label.grid(row=0, column=2, sticky="w")
+        kucoin_status_lbl = ttk.Label(kucoin_row, textvariable=kucoin_status_var, foreground=DARK_MUTED)
+        kucoin_status_lbl.grid(row=0, column=5, sticky="e", padx=(8, 0))
         kucoin_open_btn = ttk.Button(kucoin_row, text="Open Folder", command=lambda: _open_in_file_manager(self.project_dir))
         kucoin_open_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
         kucoin_clear_btn = ttk.Button(kucoin_row, text="Clear", command=_clear_kucoin_files)
@@ -6269,6 +7313,8 @@ class PowerTraderHub(tk.Tk):
         binance_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
         binance_label = ttk.Label(binance_row, text="Spot & Futures", foreground=DARK_MUTED)
         binance_label.grid(row=0, column=2, sticky="w")
+        binance_status_lbl = ttk.Label(binance_row, textvariable=binance_status_var, foreground=DARK_MUTED)
+        binance_status_lbl.grid(row=0, column=5, sticky="e", padx=(8, 0))
         binance_open_btn = ttk.Button(binance_row, text="Open Folder", command=lambda: _open_in_file_manager(self.project_dir))
         binance_open_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
         binance_clear_btn = ttk.Button(binance_row, text="Clear", command=_clear_binance_files)
@@ -6289,6 +7335,8 @@ class PowerTraderHub(tk.Tk):
         kraken_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
         kraken_label = ttk.Label(kraken_row, text="European exchange", foreground=DARK_MUTED)
         kraken_label.grid(row=0, column=2, sticky="w")
+        kraken_status_lbl = ttk.Label(kraken_row, textvariable=kraken_status_var, foreground=DARK_MUTED)
+        kraken_status_lbl.grid(row=0, column=5, sticky="e", padx=(8, 0))
         kraken_open_btn = ttk.Button(kraken_row, text="Open Folder", command=lambda: _open_in_file_manager(self.project_dir))
         kraken_open_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
         kraken_clear_btn = ttk.Button(kraken_row, text="Clear", command=_clear_kraken_files)
@@ -6309,6 +7357,8 @@ class PowerTraderHub(tk.Tk):
         coinbase_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
         coinbase_label = ttk.Label(coinbase_row, text="US-based exchange", foreground=DARK_MUTED)
         coinbase_label.grid(row=0, column=2, sticky="w")
+        coinbase_status_lbl = ttk.Label(coinbase_row, textvariable=coinbase_status_var, foreground=DARK_MUTED)
+        coinbase_status_lbl.grid(row=0, column=5, sticky="e", padx=(8, 0))
         coinbase_open_btn = ttk.Button(coinbase_row, text="Open Folder", command=lambda: _open_in_file_manager(self.project_dir))
         coinbase_open_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
         coinbase_clear_btn = ttk.Button(coinbase_row, text="Clear", command=_clear_coinbase_files)
@@ -6329,12 +7379,40 @@ class PowerTraderHub(tk.Tk):
         bybit_setup_btn.grid(row=0, column=1, sticky="w", padx=(6, 8))
         bybit_label = ttk.Label(bybit_row, text="Derivatives platform", foreground=DARK_MUTED)
         bybit_label.grid(row=0, column=2, sticky="w")
+        bybit_status_lbl = ttk.Label(bybit_row, textvariable=bybit_status_var, foreground=DARK_MUTED)
+        bybit_status_lbl.grid(row=0, column=5, sticky="e", padx=(8, 0))
         bybit_open_btn = ttk.Button(bybit_row, text="Open Folder", command=lambda: _open_in_file_manager(self.project_dir))
         bybit_open_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
         bybit_clear_btn = ttk.Button(bybit_row, text="Clear", command=_clear_bybit_files)
         bybit_clear_btn.grid(row=0, column=4, sticky="e", padx=(8, 0))
         
         r += 1
+
+        # Initialize inline credential status labels
+        try:
+            _refresh_api_status()
+        except Exception:
+            pass
+        try:
+            _refresh_kucoin_status()
+        except Exception:
+            pass
+        try:
+            _refresh_binance_status()
+        except Exception:
+            pass
+        try:
+            _refresh_kraken_status()
+        except Exception:
+            pass
+        try:
+            _refresh_coinbase_status()
+        except Exception:
+            pass
+        try:
+            _refresh_bybit_status()
+        except Exception:
+            pass
 
         ttk.Separator(frm, orient="horizontal").grid(row=r, column=0, columnspan=3, sticky="ew", pady=10); r += 1
 

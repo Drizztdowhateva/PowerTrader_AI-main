@@ -1,12 +1,87 @@
-from kucoin.client import Market
-market = Market(url='https://api.kucoin.com')
+try:
+    from kucoin.client import Market
+    market = Market(url='https://api.kucoin.com')
+    USE_KUCOIN_API = True
+except ImportError:
+    market = None
+    USE_KUCOIN_API = False
+    print("Warning: kucoin-python not installed. Using REST API fallback.")
+
 import time
+import requests
 """
 <------------
 newest oldest
 ------------>
 oldest newest
 """
+
+# REST API fallback functions for when kucoin-python is not available
+def get_kline_rest(symbol, timeframe, startAt, endAt):
+    """Fetch klines from KuCoin REST API."""
+    try:
+        url = f"https://api.kucoin.com/api/v1/market/candles"
+        params = {
+            "symbol": symbol,
+            "type": timeframe,
+            "startAt": startAt,
+            "endAt": endAt
+        }
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") == "200000" and data.get("data"):
+            return data["data"]
+        return []
+    except Exception as e:
+        print(f"Error fetching klines from REST API: {e}")
+        return []
+
+def get_ticker_rest(symbol):
+    """Fetch ticker from KuCoin REST API."""
+    try:
+        url = f"https://api.kucoin.com/api/v1/market/orderbook/level1"
+        params = {"symbol": symbol}
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") == "200000" and data.get("data"):
+            ticker = data["data"]
+            return {
+                "price": float(ticker.get("price", 0))
+            }
+        return {"price": 0}
+    except Exception as e:
+        print(f"Error fetching ticker from REST API: {e}")
+        return {"price": 0}
+
+# Wrapper class to handle both SDK and REST API
+class KuCoinMarket:
+    def __init__(self, sdk_market=None):
+        self.sdk = sdk_market
+    
+    def get_kline(self, symbol, timeframe, startAt, endAt):
+        if self.sdk and USE_KUCOIN_API:
+            try:
+                return self.sdk.get_kline(symbol, timeframe, startAt=startAt, endAt=endAt)
+            except Exception:
+                pass
+        return get_kline_rest(symbol, timeframe, startAt, endAt)
+    
+    def get_ticker(self, symbol):
+        if self.sdk and USE_KUCOIN_API:
+            try:
+                return self.sdk.get_ticker(symbol)
+            except Exception:
+                pass
+        return get_ticker_rest(symbol)
+
+# Use wrapper for market access
+if market is None:
+    market = KuCoinMarket(None)
+else:
+    market = KuCoinMarket(market)
+
 avg50 = []
 import sys
 import datetime

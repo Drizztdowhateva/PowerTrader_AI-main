@@ -95,6 +95,8 @@ From the same Command Prompt window (inside your PowerTrader folder), run:
 The app that opens is the **PowerTrader Hub**.  
 This is the only thing you need to run day-to-day.
 
+**Note:** You may have to run in fullscreen to see all tabs, or you can drag the bars to reveal the tabs. Full Screen is the best view. The window layout is not saving yet - this is a known issue.
+
 ---
 
 ## Step 5 — Set your folder, coins, and Robinhood keys (inside the Hub)

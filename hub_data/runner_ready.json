@@ -1,1 +1,7 @@
-{"timestamp": 1767915480.762962, "ready": false, "stage": "stopped"}
+{
+  "timestamp": 1767935546.346535,
+  "ready": false,
+  "stage": "training_required",
+  "ready_coins": [],
+  "total_coins": 5
+}

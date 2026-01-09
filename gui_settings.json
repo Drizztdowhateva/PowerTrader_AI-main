@@ -34,7 +34,14 @@
   "exchange_kraken_enabled": false,
   "exchange_coinbase_enabled": false,
   "exchange_bybit_enabled": false,
-  "exchange_robinhood_enabled": false,
+  "exchange_robinhood_enabled": true,
   "exchange_kucoin_enabled": false,
-  "use_robinhood_api": true
+  "use_robinhood_api": true,
+  "window_geometry": "1680x1018+0+0",
+  "pane_sashes": {
+    "outer": 554,
+    "left_split": 774,
+    "right_split": 437,
+    "right_bottom_split": 316
+  }
 }
