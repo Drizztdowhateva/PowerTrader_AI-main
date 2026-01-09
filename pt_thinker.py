@@ -308,7 +308,24 @@ for _sym in CURRENT_COINS:
 
 
 distance = 0.5
-tf_choices = ['1hour', '2hour', '4hour', '8hour', '12hour', '1day', '1week']
+
+# Load neural timeframes from GUI settings
+def _load_neural_timeframes() -> list:
+	"""Returns the list of selected neural timeframes from gui_settings.json"""
+	try:
+		if os.path.isfile(_GUI_SETTINGS_PATH):
+			with open(_GUI_SETTINGS_PATH, "r", encoding="utf-8") as f:
+				data = json.load(f) or {}
+			tfs = data.get("neural_timeframes", None)
+			if isinstance(tfs, list) and tfs:
+				return [str(tf).strip() for tf in tfs if str(tf).strip()]
+	except Exception:
+		pass
+	# Fallback default
+	return ['1hour', '2hour', '4hour', '8hour', '12hour', '1day', '1week']
+
+# Active neural timeframes loaded from settings
+tf_choices = _load_neural_timeframes()
 
 def new_coin_state():
 	return {
@@ -366,10 +383,21 @@ def _sync_coins_from_settings():
 
 	- Adds new coins: creates folder + init_coin() + starts stepping them
 	- Removes coins: stops stepping them (leaves state on disk untouched)
+	- Updates neural_timeframes: reloads tf_choices list
 	"""
-	global CURRENT_COINS
+	global CURRENT_COINS, tf_choices
 
 	new_list = _load_gui_coins()
+	
+	# Check if neural timeframes changed
+	new_tfs = _load_neural_timeframes()
+	if new_tfs != tf_choices:
+		tf_choices = new_tfs
+		# Reset states for all coins when timeframes change so arrays stay consistent
+		for sym in list(states.keys()):
+			states[sym] = new_coin_state()
+		print(f"Neural timeframes updated to: {tf_choices}")
+	
 	if new_list == CURRENT_COINS:
 		return
 

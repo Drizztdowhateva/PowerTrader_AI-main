@@ -1,4 +1,9 @@
 from __future__ import annotations
+# Version: 2026-01-09
+# - Fixed: Start All button in Controls/Health now always clickable (removed training-gate disable)
+# - Toggle button properly shows "Start All" / "Stop All" based on runner/trader state
+# - Stops neural (pt_thinker.py), trader (pt_trader.py), and all trainers when clicking "Stop All"
+
 import os
 import sys
 import json
@@ -767,11 +772,34 @@ class CandleChart(ttk.Frame):
         self.ax.set_title(f"{coin}", color=DARK_FG)
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
-        canvas_w = self.canvas.get_tk_widget()
-        canvas_w.configure(bg=DARK_BG)
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.configure(bg=DARK_BG)
 
         # Remove horizontal padding here so the chart widget truly fills the container.
-        canvas_w.pack(fill="both", expand=True, padx=0, pady=(0, 6))
+        self.canvas_widget.pack(fill="both", expand=True, padx=0, pady=(0, 6))
+
+        # Draggable neural levels state
+        self._dragging_line = None
+        self._dragging_is_long = None
+        self._drag_original_price = None
+        self._neural_lines_long = []
+        self._neural_lines_short = []
+        self._current_folder = ""
+        
+        # Connect mouse events for dragging neural levels - AFTER canvas is packed
+        self._mouse_cids = []
+        try:
+            # Use Tkinter bindings instead of matplotlib's event system for more reliable interaction
+            self.canvas_widget.bind('<Button-1>', self._tk_on_mouse_press, add='+')
+            self.canvas_widget.bind('<B1-Motion>', self._tk_on_mouse_move, add='+')
+            self.canvas_widget.bind('<ButtonRelease-1>', self._tk_on_mouse_release, add='+')
+            self.canvas_widget.bind('<Motion>', self._tk_on_hover, add='+')
+            print(f"[CandleChart {coin}] Tkinter mouse event handlers connected to {self.canvas_widget}")
+        except Exception as e:
+            print(f"[CandleChart {coin}] Error connecting events: {e}")
+        
+        # Add hover indicator text (shows when mouse is near a draggable line)
+        self._hover_text = None
 
         # Keep the matplotlib figure EXACTLY the same pixel size as the Tk widget.
         # FigureCanvasTkAgg already sizes its backing PhotoImage to e.width/e.height.
@@ -804,7 +832,7 @@ class CandleChart(ttk.Frame):
             except Exception:
                 pass
 
-        canvas_w.bind("<Configure>", _on_canvas_configure, add="+")
+        self.canvas_widget.bind("<Configure>", _on_canvas_configure, add="+")
 
 
 
@@ -943,17 +971,29 @@ class CandleChart(ttk.Frame):
 
 
         # Overlay Neural levels (blue long, orange short)
+        self._neural_lines_long = []
+        self._neural_lines_short = []
+        self._current_folder = folder
+        
+        print(f"[{self.coin}] Populating neural lines: {len(long_levels)} long, {len(short_levels)} short")
+        
         for lv in long_levels:
             try:
-                self.ax.axhline(y=float(lv), linewidth=1, color="blue", alpha=0.8)
-            except Exception:
-                pass
+                line = self.ax.axhline(y=float(lv), linewidth=1, color="blue", alpha=0.8, picker=5)
+                self._neural_lines_long.append((line, float(lv)))
+                print(f"  Added LONG line at {float(lv):.2f}")
+            except Exception as e:
+                print(f"  Error adding LONG line: {e}")
 
         for lv in short_levels:
             try:
-                self.ax.axhline(y=float(lv), linewidth=1, color="orange", alpha=0.8)
-            except Exception:
-                pass
+                line = self.ax.axhline(y=float(lv), linewidth=1, color="orange", alpha=0.8, picker=5)
+                self._neural_lines_short.append((line, float(lv)))
+                print(f"  Added SHORT line at {float(lv):.2f}")
+            except Exception as e:
+                print(f"  Error adding SHORT line: {e}")
+        
+        print(f"[{self.coin}] Total stored: {len(self._neural_lines_long)} long, {len(self._neural_lines_short)} short")
 
 
         # Overlay Trailing PM line (sell) and next DCA line
@@ -1171,6 +1211,364 @@ class CandleChart(ttk.Frame):
         else:
             self.last_update_label.config(text="Last: N/A")
 
+    def _tk_on_mouse_press(self, event):
+        """Tkinter mouse press handler - converts to matplotlib coordinates."""
+        print(f"[TK PRESS] Event received: x={event.x}, y={event.y}, widget={event.widget}")
+        try:
+            # Convert Tkinter coordinates to matplotlib display coordinates
+            # event.x, event.y are relative to canvas widget
+            display_x = event.x
+            display_y = self.canvas.get_tk_widget().winfo_height() - event.y
+            
+            # Convert display coordinates to data coordinates
+            inv = self.ax.transData.inverted()
+            x_data, y_data = inv.transform((display_x, display_y))
+            
+            # Check if click is inside axes
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            if not (xlim[0] <= x_data <= xlim[1] and ylim[0] <= y_data <= ylim[1]):
+                return
+            
+            # Calculate tolerance
+            y_range = ylim[1] - ylim[0]
+            tolerance = y_range * 0.05
+            
+            print(f"[TK Mouse Press] y_data={y_data:.2f}, checking {len(self._neural_lines_long)} long, {len(self._neural_lines_short)} short")
+            
+            # Check long lines
+            for line, price in self._neural_lines_long:
+                if abs(y_data - price) < tolerance:
+                    self._dragging_line = line
+                    self._dragging_is_long = True
+                    self._drag_original_price = price
+                    line.set_linewidth(3)
+                    line.set_alpha(1.0)
+                    line.set_color('cyan')
+                    self.canvas.draw_idle()
+                    print(f"Started dragging LONG line at {price:.2f}")
+                    return
+            
+            # Check short lines
+            for line, price in self._neural_lines_short:
+                if abs(y_data - price) < tolerance:
+                    self._dragging_line = line
+                    self._dragging_is_long = False
+                    self._drag_original_price = price
+                    line.set_linewidth(3)
+                    line.set_alpha(1.0)
+                    line.set_color('yellow')
+                    self.canvas.draw_idle()
+                    print(f"Started dragging SHORT line at {price:.2f}")
+                    return
+        except Exception as e:
+            print(f"Error in mouse press: {e}")
+    
+    def _tk_on_mouse_move(self, event):
+        """Tkinter mouse move handler for dragging."""
+        if self._dragging_line is None:
+            return
+        
+        try:
+            display_x = event.x
+            display_y = self.canvas.get_tk_widget().winfo_height() - event.y
+            
+            inv = self.ax.transData.inverted()
+            x_data, y_data = inv.transform((display_x, display_y))
+            
+            # Update line position
+            self._dragging_line.set_ydata([y_data, y_data])
+            self.canvas.draw_idle()
+        except Exception as e:
+            print(f"Error in mouse move: {e}")
+    
+    def _tk_on_mouse_release(self, event):
+        """Tkinter mouse release handler to save changes."""
+        if self._dragging_line is None:
+            return
+        
+        try:
+            new_price = float(self._dragging_line.get_ydata()[0])
+            
+            if self._dragging_is_long:
+                for i, (line, price) in enumerate(self._neural_lines_long):
+                    if line == self._dragging_line:
+                        self._neural_lines_long[i] = (line, new_price)
+                        break
+                prices = sorted([p for _, p in self._neural_lines_long], reverse=True)
+                self._save_neural_levels(prices, is_long=True)
+                self._dragging_line.set_linewidth(1)
+                self._dragging_line.set_alpha(0.8)
+                self._dragging_line.set_color('blue')
+            else:
+                for i, (line, price) in enumerate(self._neural_lines_short):
+                    if line == self._dragging_line:
+                        self._neural_lines_short[i] = (line, new_price)
+                        break
+                prices = sorted([p for _, p in self._neural_lines_short])
+                self._save_neural_levels(prices, is_long=False)
+                self._dragging_line.set_linewidth(1)
+                self._dragging_line.set_alpha(0.8)
+                self._dragging_line.set_color('orange')
+            
+            print(f"Neural level saved: {'LONG' if self._dragging_is_long else 'SHORT'} {self._drag_original_price:.2f} -> {new_price:.2f}")
+        except Exception as e:
+            print(f"Error in mouse release: {e}")
+        finally:
+            self._dragging_line = None
+            self._dragging_is_long = None
+            self._drag_original_price = None
+            self.canvas.draw_idle()
+    
+    def _tk_on_hover(self, event):
+        """Tkinter hover handler to show tooltip."""
+        if self._dragging_line is not None:
+            return
+        
+        try:
+            display_x = event.x
+            display_y = self.canvas.get_tk_widget().winfo_height() - event.y
+            
+            inv = self.ax.transData.inverted()
+            x_data, y_data = inv.transform((display_x, display_y))
+            
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            if not (xlim[0] <= x_data <= xlim[1] and ylim[0] <= y_data <= ylim[1]):
+                if self._hover_text is not None:
+                    self._hover_text.remove()
+                    self._hover_text = None
+                    self.canvas.draw_idle()
+                return
+            
+            y_range = ylim[1] - ylim[0]
+            tolerance = y_range * 0.05
+            
+            hovered_price = None
+            hovered_type = None
+            
+            for line, price in self._neural_lines_long:
+                if abs(y_data - price) < tolerance:
+                    hovered_price = price
+                    hovered_type = "LONG"
+                    break
+            
+            if hovered_price is None:
+                for line, price in self._neural_lines_short:
+                    if abs(y_data - price) < tolerance:
+                        hovered_price = price
+                        hovered_type = "SHORT"
+                        break
+            
+            if hovered_price is not None:
+                if self._hover_text is not None:
+                    self._hover_text.remove()
+                self._hover_text = self.ax.text(
+                    0.02, 0.98,
+                    f"Drag to move {hovered_type} level: ${hovered_price:.2f}",
+                    transform=self.ax.transAxes,
+                    fontsize=9,
+                    color=DARK_ACCENT,
+                    bbox=dict(boxstyle='round', facecolor=DARK_PANEL, alpha=0.9, edgecolor=DARK_ACCENT),
+                    verticalalignment='top',
+                    zorder=1000
+                )
+                self.canvas.draw_idle()
+            else:
+                if self._hover_text is not None:
+                    self._hover_text.remove()
+                    self._hover_text = None
+                    self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_mouse_press(self, event):
+        """Handle mouse press to start dragging a neural level line."""
+        print(f"[Mouse Press] button={event.button}, inaxes={event.inaxes==self.ax}, x={event.x}, y={event.y}, ydata={event.ydata}")
+        
+        if event.inaxes != self.ax or event.button != 1:
+            return
+        
+        y = event.ydata
+        if y is None:
+            return
+        
+        # Calculate tolerance in data units (5% of y-axis range)
+        y_range = self.ax.get_ylim()[1] - self.ax.get_ylim()[0]
+        tolerance = y_range * 0.05
+        
+        print(f"[Mouse Press] Checking {len(self._neural_lines_long)} long lines, {len(self._neural_lines_short)} short lines, tolerance={tolerance:.2f}")
+        
+        # Check if click is near any long level line (blue)
+        for line, price in self._neural_lines_long:
+            if abs(y - price) < tolerance:
+                self._dragging_line = line
+                self._dragging_is_long = True
+                self._drag_original_price = price
+                line.set_linewidth(3)
+                line.set_alpha(1.0)
+                line.set_color('cyan')  # Change to cyan while dragging
+                self.canvas.draw_idle()
+                print(f"[Mouse Press] Started dragging LONG line at {price:.2f}")
+                return
+        
+        # Check if click is near any short level line (orange)
+        for line, price in self._neural_lines_short:
+            if abs(y - price) < tolerance:
+                self._dragging_line = line
+                self._dragging_is_long = False
+                self._drag_original_price = price
+                line.set_linewidth(3)
+                line.set_alpha(1.0)
+                line.set_color('yellow')  # Change to yellow while dragging
+                self.canvas.draw_idle()
+                print(f"[Mouse Press] Started dragging SHORT line at {price:.2f}")
+                return
+    
+    def _on_mouse_move(self, event):
+        """Handle mouse move to drag the selected line or show hover indicator."""
+        # If dragging, update line position
+        if self._dragging_line is not None:
+            if event.inaxes != self.ax:
+                return
+            
+            y = event.ydata
+            if y is None:
+                return
+            
+            self._dragging_line.set_ydata([y, y])
+            self.canvas.draw_idle()
+            return
+        
+        # If not dragging, show hover effect when near a line
+        if event.inaxes != self.ax:
+            # Remove hover indicator if we leave the axes
+            if self._hover_text is not None:
+                try:
+                    self._hover_text.remove()
+                    self._hover_text = None
+                    self.canvas.draw_idle()
+                except Exception:
+                    pass
+            return
+        
+        y = event.ydata
+        if y is None:
+            return
+        
+        # Calculate tolerance
+        y_range = self.ax.get_ylim()[1] - self.ax.get_ylim()[0]
+        tolerance = y_range * 0.05
+        
+        # Check if hovering near any neural line
+        hovered_price = None
+        hovered_type = None
+        
+        for line, price in self._neural_lines_long:
+            if abs(y - price) < tolerance:
+                hovered_price = price
+                hovered_type = "LONG"
+                break
+        
+        if hovered_price is None:
+            for line, price in self._neural_lines_short:
+                if abs(y - price) < tolerance:
+                    hovered_price = price
+                    hovered_type = "SHORT"
+                    break
+        
+        # Update hover indicator
+        if hovered_price is not None:
+            if self._hover_text is not None:
+                try:
+                    self._hover_text.remove()
+                except Exception:
+                    pass
+            try:
+                self._hover_text = self.ax.text(
+                    0.02, 0.98, 
+                    f"Click & drag to move {hovered_type} level: ${hovered_price:.2f}",
+                    transform=self.ax.transAxes,
+                    fontsize=9,
+                    color=DARK_ACCENT,
+                    bbox=dict(boxstyle='round', facecolor=DARK_PANEL, alpha=0.9, edgecolor=DARK_ACCENT),
+                    verticalalignment='top',
+                    zorder=1000
+                )
+                self.canvas.draw_idle()
+            except Exception:
+                pass
+        else:
+            # Remove hover indicator if not near any line
+            if self._hover_text is not None:
+                try:
+                    self._hover_text.remove()
+                    self._hover_text = None
+                    self.canvas.draw_idle()
+                except Exception:
+                    pass
+    
+    def _on_mouse_release(self, event):
+        """Handle mouse release to finalize the drag and save new level."""
+        if self._dragging_line is None:
+            return
+        
+        try:
+            # Get new price value
+            new_price = float(self._dragging_line.get_ydata()[0])
+            
+            # Find and update the price in the appropriate list
+            if self._dragging_is_long:
+                for i, (line, price) in enumerate(self._neural_lines_long):
+                    if line == self._dragging_line:
+                        self._neural_lines_long[i] = (line, new_price)
+                        break
+                # Save updated long levels
+                prices = sorted([p for _, p in self._neural_lines_long], reverse=True)
+                self._save_neural_levels(prices, is_long=True)
+                # Restore line appearance
+                self._dragging_line.set_linewidth(1)
+                self._dragging_line.set_alpha(0.8)
+                self._dragging_line.set_color('blue')
+            else:
+                for i, (line, price) in enumerate(self._neural_lines_short):
+                    if line == self._dragging_line:
+                        self._neural_lines_short[i] = (line, new_price)
+                        break
+                # Save updated short levels
+                prices = sorted([p for _, p in self._neural_lines_short])
+                self._save_neural_levels(prices, is_long=False)
+                # Restore line appearance
+                self._dragging_line.set_linewidth(1)
+                self._dragging_line.set_alpha(0.8)
+                self._dragging_line.set_color('orange')
+            
+            print(f"Neural level adjusted: {'LONG' if self._dragging_is_long else 'SHORT'} {self._drag_original_price:.2f} -> {new_price:.2f}")
+        except Exception as e:
+            print(f"Error saving neural level: {e}")
+        finally:
+            self._dragging_line = None
+            self._dragging_is_long = None
+            self._drag_original_price = None
+            self.canvas.draw_idle()
+    
+    def _save_neural_levels(self, prices, is_long=True):
+        """Save adjusted neural levels back to the HTML files."""
+        if not self._current_folder:
+            return
+        
+        try:
+            filename = "low_bound_prices.html" if is_long else "high_bound_prices.html"
+            path = os.path.join(self._current_folder, filename)
+            
+            # Write prices as space-separated values (matching pt_thinker format)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(" ".join([str(p) for p in prices]))
+            
+            print(f"Saved {'long' if is_long else 'short'} neural levels to {filename}: {len(prices)} levels")
+        except Exception as e:
+            print(f"Error writing neural levels file: {e}")
+
 
 # -----------------------------
 # Account Value chart widget
@@ -1205,11 +1603,11 @@ class AccountValueChart(ttk.Frame):
         self.ax.set_title("Account Value", color=DARK_FG)
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
-        canvas_w = self.canvas.get_tk_widget()
-        canvas_w.configure(bg=DARK_BG)
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.configure(bg=DARK_BG)
 
         # Remove horizontal padding here so the chart widget truly fills the container.
-        canvas_w.pack(fill="both", expand=True, padx=0, pady=(0, 6))
+        self.canvas_widget.pack(fill="both", expand=True, padx=0, pady=(0, 6))
 
         # Keep the matplotlib figure EXACTLY the same pixel size as the Tk widget.
         # FigureCanvasTkAgg already sizes its backing PhotoImage to e.width/e.height.
@@ -1242,7 +1640,7 @@ class AccountValueChart(ttk.Frame):
             except Exception:
                 pass
 
-        canvas_w.bind("<Configure>", _on_canvas_configure, add="+")
+        self.canvas_widget.bind("<Configure>", _on_canvas_configure, add="+")
 
 
 
@@ -1487,7 +1885,19 @@ class AccountValueChart(ttk.Frame):
         self.ax.set_xlim(-0.5, (len(points) - 0.5) + 0.6)
 
         try:
-            self.ax.set_title(f"Account Value ({_fmt_money(ys[-1])})", color=DARK_FG)
+            last_value = ys[-1]
+            if last_value < 0:
+                # Use red color for deficit warning in chart title
+                title_text = f"Account Value ({_fmt_money(last_value)}) "
+                self.ax.set_title(title_text, color=DARK_FG)
+                # Add red warning text above the title
+                self.ax.text(0.5, 1.02, "***Deficit**", 
+                           transform=self.ax.transAxes, ha='center', va='bottom',
+                           color='red', fontsize=10, weight='bold')
+                self.ax.set_title(title_text.strip(), color=DARK_FG)
+            else:
+                title_text = f"Account Value ({_fmt_money(last_value)})"
+                self.ax.set_title(title_text, color=DARK_FG)
         except Exception:
             self.ax.set_title("Account Value", color=DARK_FG)
 
@@ -1530,9 +1940,64 @@ class LogProc:
 
 class PowerTraderHub(tk.Tk):
     def __init__(self):
-        super().__init__()
-        self.title("PowerTrader - Hub")
+        super().__init__(className="powertraderai")
+        
+        # Set window title
+        self.title("Power Trader AI")
+        
+        # CRITICAL for Wayland/Dash to Dock: Set WM_CLASS immediately
+        # Use simple lowercase no-hyphen format for best Wayland compatibility
+        try:
+            self.wm_class("powertraderai", "powertraderai")
+        except Exception:
+            pass
+        
+        # Set icon name
+        try:
+            self.wm_iconname("Power Trader AI")
+        except Exception:
+            pass
+        
+        # Wayland-specific window properties
+        try:
+            self.attributes('-type', 'normal')
+        except Exception:
+            pass
+        
+        try:
+            self.overrideredirect(False)
+        except Exception:
+            pass
+        
+        try:
+            self.transient(None)
+        except Exception:
+            pass
+        
+        try:
+            self.protocol("WM_DELETE_WINDOW", self.quit)
+        except Exception:
+            pass
+        
+        # CRITICAL: Force window properties to be sent to compositor
+        try:
+            self.update_idletasks()
+            self.update()
+        except Exception:
+            pass
+        
         self.geometry("1400x820")
+
+        # Set window icon from PNG file
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "PowerTrader.png")
+            if os.path.exists(icon_path):
+                icon = tk.PhotoImage(file=icon_path)
+                self.iconphoto(True, icon)
+                # Keep reference to prevent garbage collection
+                self._icon = icon
+        except Exception as e:
+            print(f"Could not load icon: {e}")
 
         # Hard minimum window size so the UI can't be shrunk to a point where panes vanish.
         # (Keeps things usable even if someone aggressively resizes.)
@@ -1563,8 +2028,15 @@ class PowerTraderHub(tk.Tk):
         except Exception:
             pass
         
-        # Start in fullscreen mode
-        self.attributes('-fullscreen', True)
+        # Start maximized (not fullscreen) to allow OS window manager shortcuts
+        try:
+            self.state('zoomed')  # Works on Windows/Linux
+        except Exception:
+            try:
+                # Fallback for some Linux window managers
+                self.attributes('-zoomed', True)
+            except Exception:
+                pass
         
         # Bind F11 to toggle fullscreen and Escape to exit fullscreen
         self.bind('<F11>', lambda e: self.attributes('-fullscreen', not self.attributes('-fullscreen')))
@@ -1582,6 +2054,14 @@ class PowerTraderHub(tk.Tk):
         self.trade_history_path = os.path.join(self.hub_dir, "trade_history.jsonl")
         self.pnl_ledger_path = os.path.join(self.hub_dir, "pnl_ledger.json")
         self.account_value_history_path = os.path.join(self.hub_dir, "account_value_history.jsonl")
+        
+        # Ensure trade_history.jsonl exists (create empty file if missing)
+        try:
+            if not os.path.isfile(self.trade_history_path):
+                with open(self.trade_history_path, "w", encoding="utf-8") as f:
+                    pass  # Create empty file
+        except Exception:
+            pass
 
         # file written by pt_thinker.py (runner readiness gate used for Start All)
         self.runner_ready_path = os.path.join(self.hub_dir, "runner_ready.json")
@@ -1688,6 +2168,9 @@ class PowerTraderHub(tk.Tk):
         self.bind_all("<<TimeframeChanged>>", self._on_timeframe_changed)
 
         self._last_chart_refresh = 0.0
+
+        # Poll Robinhood account balance on startup if API is enabled
+        self._poll_initial_account_balance()
 
         if bool(self.settings.get("auto_start_scripts", False)):
             self.start_all_scripts()
@@ -1952,61 +2435,134 @@ class PowerTraderHub(tk.Tk):
     def _save_settings(self) -> None:
         _safe_write_json(SETTINGS_FILE, self.settings)
 
-    def _on_close(self) -> None:
-        """Save window geometry to settings and exit."""
+    def _poll_initial_account_balance(self) -> None:
+        """Poll Robinhood account balance on startup if API is enabled and credentials exist."""
         try:
+            # Check if Robinhood API is enabled
+            if not self.settings.get("use_robinhood_api", False):
+                return
+            if not self.settings.get("exchange_robinhood_enabled", False):
+                return
+            
+            # Check if credentials exist
+            r_key_path = os.path.join(self.project_dir, "r_key.txt")
+            r_secret_path = os.path.join(self.project_dir, "r_secret.txt")
+            
+            if not os.path.isfile(r_key_path) or not os.path.isfile(r_secret_path):
+                return
+            
+            # Import necessary modules
+            import base64
+            import time
+            import requests
+            from nacl.signing import SigningKey
+            
+            # Read credentials
+            with open(r_key_path, "r") as f:
+                api_key = f.read().strip()
+            with open(r_secret_path, "r") as f:
+                base64_private_key = f.read().strip()
+            
+            if not api_key or not base64_private_key:
+                return
+            
+            # Initialize signing key
+            raw_private = base64.b64decode(base64_private_key)
+            private_key = SigningKey(raw_private)
+            
+            # Make API request to get account
+            base_url = "https://trading.robinhood.com"
+            path = "/api/v1/crypto/trading/accounts/"
+            method = "GET"
+            timestamp = int(time.time())
+            body = ""
+            
+            message_to_sign = f"{api_key}{timestamp}{path}{method}{body}"
+            signed = private_key.sign(message_to_sign.encode("utf-8"))
+            signature_b64 = base64.b64encode(signed.signature).decode("utf-8")
+            
+            headers = {
+                "x-api-key": api_key,
+                "x-timestamp": str(timestamp),
+                "x-signature": signature_b64,
+            }
+            
+            response = requests.get(f"{base_url}{path}", headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                account = response.json()
+                
+                # Extract buying power (try multiple field names)
+                buying_power = None
+                if isinstance(account, dict):
+                    if "results" in account and isinstance(account["results"], list) and len(account["results"]) > 0:
+                        acct_data = account["results"][0]
+                    else:
+                        acct_data = account
+                    
+                    for field in ["buying_power", "cash", "cash_balance", "available_cash", "buying_power_amount"]:
+                        if field in acct_data and acct_data[field] is not None:
+                            buying_power = float(acct_data[field])
+                            break
+                
+                # Update trader status file with initial balance
+                if buying_power is not None:
+                    status = {
+                        "timestamp": time.time(),
+                        "account": {
+                            "total_account_value": buying_power,
+                            "buying_power": buying_power,
+                            "holdings_sell_value": 0.0,
+                            "holdings_buy_value": 0.0,
+                            "percent_in_trade": 0.0,
+                            "pm_start_pct_no_dca": 5.0,
+                            "pm_start_pct_with_dca": 2.5,
+                            "trailing_gap_pct": 0.5,
+                        },
+                        "positions": {},
+                    }
+                    _safe_write_json(self.trader_status_path, status)
+        except Exception:
+            # Silently fail - don't interrupt startup if API check fails
+            pass
+
+    def _on_close(self) -> None:
+        """Close the application and save window size and layout."""
+        try:
+            # Save current window geometry
             geom = self.geometry()
             if geom:
+                self.settings["window_geometry"] = geom
+            
+            # Save pane sash positions
+            s = self.settings.setdefault("pane_sashes", {})
+            if hasattr(self, "_pw_outer") and self._pw_outer:
                 try:
-                    self.settings["window_geometry"] = geom
+                    s["outer"] = int(self._pw_outer.sashpos(0))
                 except Exception:
                     pass
-        except Exception:
-            pass
-
-        # Save panedwindow sash positions so trainer levels and charts sizing persist
-        try:
-            s = self.settings.setdefault("pane_sashes", {})
-            try:
-                if hasattr(self, "_pw_outer") and getattr(self, "_pw_outer"):
-                    try:
-                        s["outer"] = int(self._pw_outer.sashpos(0))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            try:
-                if hasattr(self, "_pw_left_split") and getattr(self, "_pw_left_split"):
-                    try:
-                        s["left_split"] = int(self._pw_left_split.sashpos(0))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            try:
-                if hasattr(self, "_pw_right_split") and getattr(self, "_pw_right_split"):
-                    try:
-                        s["right_split"] = int(self._pw_right_split.sashpos(0))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            try:
-                if hasattr(self, "_pw_right_bottom_split") and getattr(self, "_pw_right_bottom_split"):
-                    try:
-                        s["right_bottom_split"] = int(self._pw_right_bottom_split.sashpos(0))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-        except Exception:
-            pass
-
-        try:
+            if hasattr(self, "_pw_left_split") and self._pw_left_split:
+                try:
+                    s["left_split"] = int(self._pw_left_split.sashpos(0))
+                except Exception:
+                    pass
+            if hasattr(self, "_pw_right_split") and self._pw_right_split:
+                try:
+                    s["right_split"] = int(self._pw_right_split.sashpos(0))
+                except Exception:
+                    pass
+            if hasattr(self, "_pw_right_bottom_split") and self._pw_right_bottom_split:
+                try:
+                    s["right_bottom_split"] = int(self._pw_right_bottom_split.sashpos(0))
+                except Exception:
+                    pass
+            
+            # Save to disk
             self._save_settings()
         except Exception:
             pass
+        
+        self.destroy()
 
     def _open_resize_dialog(self) -> None:
         """Opens a dialog to resize the main window."""
@@ -2383,17 +2939,7 @@ class PowerTraderHub(tk.Tk):
         m_scripts.add_command(label="Stop Trader", command=self.stop_trader)
         menubar.add_cascade(label="Scripts", menu=m_scripts)
 
-        m_layout = tk.Menu(
-            menubar,
-            tearoff=0,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
-        )
-        m_layout.add_command(label="Save current layout as default", command=self._save_layout_defaults)
-        m_layout.add_command(label="Resize windows...", command=self._open_resize_dialog)
-        menubar.add_cascade(label="Layout", menu=m_layout)
+        # Layout menu removed - replaced with collapsible sections
 
         self.config(menu=menubar)
 
@@ -2505,6 +3051,23 @@ class PowerTraderHub(tk.Tk):
         # LEFT: 1) Controls / Health (pane)
         # ----------------------------
         top_controls = ttk.LabelFrame(left_split, text="Controls / Health")
+
+        # Training progress bar (at the very top)
+        progress_frame = ttk.Frame(top_controls)
+        progress_frame.pack(fill="x", expand=False, padx=6, pady=(6, 0))
+        
+        self.training_progress_label = ttk.Label(progress_frame, text="Training Progress: 0%")
+        self.training_progress_label.pack(anchor="w", pady=(0, 2))
+        
+        self.training_progress = ttk.Progressbar(
+            progress_frame,
+            orient="horizontal",
+            length=200,
+            mode="determinate",
+            maximum=100
+        )
+        self.training_progress.pack(fill="x", pady=(0, 6))
+        self.training_progress["value"] = 0
 
         # Layout requirement:
         #   - Buttons (full width) ABOVE
@@ -2714,10 +3277,9 @@ class PowerTraderHub(tk.Tk):
         self.btn_toggle_all.pack(side="left")
 
 
-        # Account info (LEFT column, under status)
+        # Account info (LEFT column, under status) - Always visible
         acct_box = ttk.LabelFrame(controls_left, text="Account")
         acct_box.pack(fill="x", padx=6, pady=6)
-
 
         self.lbl_acct_total_value = ttk.Label(acct_box, text="Total Account Value: N/A")
         self.lbl_acct_total_value.pack(anchor="w", padx=6, pady=(2, 0))
@@ -2743,10 +3305,18 @@ class PowerTraderHub(tk.Tk):
 
 
 
-        # Neural levels overview (spans FULL width under the dual section)
+        # Neural levels overview (spans FULL width under the dual section) - Collapsible and larger
         # Shows the current LONG/SHORT level (0..7) for every coin at once.
-        neural_box = ttk.LabelFrame(top_controls, text="Neural Levels (0–7)")
+        neural_header = ttk.Frame(top_controls)
+        neural_header.pack(fill="x", padx=6, pady=(0, 0))
+        
+        self.neural_collapsed = tk.BooleanVar(value=False)
+        self.neural_toggle_btn = ttk.Button(neural_header, text="▼ Neural Levels (0–7)", command=self._toggle_neural)
+        self.neural_toggle_btn.pack(side="left", fill="x", expand=True)
+        
+        neural_box = ttk.Frame(top_controls)
         neural_box.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.neural_content = neural_box
 
         legend = ttk.Frame(neural_box)
         legend.pack(fill="x", padx=6, pady=(4, 0))
@@ -2862,6 +3432,13 @@ class PowerTraderHub(tk.Tk):
             self.after_idle(self._update_neural_overview_scrollbars)
         except Exception:
             pass
+        
+        # Verify all coin tiles were created
+        try:
+            if len(self.neural_tiles) != len(self.coins):
+                print(f"Warning: Neural tiles mismatch - expected {len(self.coins)}, got {len(self.neural_tiles)}")
+        except Exception:
+            pass
 
 
 
@@ -2880,9 +3457,21 @@ class PowerTraderHub(tk.Tk):
         self._live_log_font = _base.copy()
         self._live_log_font.configure(size=_half)
 
-        logs_frame = ttk.LabelFrame(left_split, text="Live Output")
+        logs_outer = ttk.Frame(left_split)
+        
+        logs_header = ttk.Frame(logs_outer)
+        logs_header.pack(fill="x", padx=6, pady=(6, 0))
+        
+        self.logs_collapsed = tk.BooleanVar(value=False)
+        self.logs_toggle_btn = ttk.Button(logs_header, text="▼ Live Output", command=self._toggle_logs)
+        self.logs_toggle_btn.pack(side="left", fill="x", expand=True)
+        
+        logs_frame = ttk.Frame(logs_outer)
+        logs_frame.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.logs_content = logs_frame
+        
         self.logs_nb = ttk.Notebook(logs_frame)
-        self.logs_nb.pack(fill="both", expand=True, padx=6, pady=6)
+        self.logs_nb.pack(fill="both", expand=True)
 
 
         # Runner tab
@@ -2991,14 +3580,14 @@ class PowerTraderHub(tk.Tk):
         self.trainer_text.bind("<Button-5>", lambda e: _on_mousewheel(e, self.trainer_text))  # Linux scroll down
 
         # Add left panes (no trades/history on the left anymore)
-        # Live Output pane uses a smaller share so it doesn't dominate the left column.
-        left_split.add(top_controls, weight=2)
-        left_split.add(logs_frame, weight=1)
+        # Neural Levels (top_controls) gets more weight to be larger
+        left_split.add(top_controls, weight=3)
+        left_split.add(logs_outer, weight=1)
 
         try:
             # Ensure the top pane can't start (or be clamped) too small to show Neural Levels.
-            left_split.paneconfigure(top_controls, minsize=360)
-            left_split.paneconfigure(logs_frame, minsize=140)
+            left_split.paneconfigure(top_controls, minsize=300)
+            left_split.paneconfigure(logs_outer, minsize=250)
         except Exception:
             pass
 
@@ -3031,7 +3620,7 @@ class PowerTraderHub(tk.Tk):
                 min_bottom = 140
 
                 # Prefer a smaller Live Output bottom pane by default.
-                desired_bottom = 180
+                desired_bottom = 300
                 target = total - max(min_bottom, desired_bottom)
                 target = max(min_top, min(total - min_bottom, target))
 
@@ -3053,56 +3642,30 @@ class PowerTraderHub(tk.Tk):
         charts_frame = ttk.LabelFrame(right_split, text="Charts (Neural lines overlaid)")
         self._charts_frame = charts_frame
 
-        # Page container (no ttk.Notebook, so there are NO native tabs to show)
-        self.chart_pages_container = ttk.Frame(charts_frame)
-        # Keep left padding, remove right padding so charts fill to the edge
-        self.chart_pages_container.pack(fill="both", expand=True, padx=(6, 0), pady=(6, 0))
+        # Container for side-by-side layout: tabs on left, charts on right
+        charts_layout = ttk.Frame(charts_frame)
+        charts_layout.pack(fill="both", expand=True, padx=6, pady=6)
 
-        # Tabs bar: horizontally-scrollable area so tabs remain visible when many coins
-        tabs_viewport = ttk.Frame(charts_frame)
-        tabs_viewport.pack(fill="x", padx=(6, 0), pady=(0, 6))
+        # LEFT: Tabs bar (vertical stack of buttons)
+        tabs_viewport = ttk.Frame(charts_layout)
+        tabs_viewport.pack(side="left", fill="y", padx=(0, 6))
 
-        tabs_canvas = tk.Canvas(tabs_viewport, height=36, bg=DARK_BG, highlightthickness=0, bd=0)
-        tabs_canvas.pack(side="top", fill="x", expand=True)
+        # Use WrapFrame in vertical orientation for stacked tab buttons
+        self.chart_tabs_bar = WrapFrame(tabs_viewport, orientation="vertical")
+        self.chart_tabs_bar.pack(fill="both", expand=True)
 
-        tabs_scroll = ttk.Scrollbar(tabs_viewport, orient="horizontal", command=tabs_canvas.xview)
-        tabs_canvas.configure(xscrollcommand=tabs_scroll.set)
-
-        # WrapFrame lives inside the canvas so it can scroll horizontally
-        self.chart_tabs_bar = WrapFrame(tabs_canvas, orientation="horizontal")
-        tabs_window = tabs_canvas.create_window((0, 0), window=self.chart_tabs_bar, anchor="nw")
-
-        def _update_tabs_scrollbars(event=None) -> None:
+        # Update function to ensure tabs are laid out properly
+        def _update_tabs_layout(event=None) -> None:
             try:
-                c = tabs_canvas
-                win_id = tabs_window
-                c.update_idletasks()
-                bbox = c.bbox(win_id)
-                if not bbox:
-                    try:
-                        tabs_scroll.pack_forget()
-                    except Exception:
-                        pass
-                    return
-                c.configure(scrollregion=bbox)
-                content_w = int(bbox[2] - bbox[0])
-                view_w = int(c.winfo_width())
-                if content_w > (view_w + 1):
-                    try:
-                        tabs_scroll.pack(side="bottom", fill="x")
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        tabs_scroll.pack_forget()
-                        c.xview_moveto(0)
-                    except Exception:
-                        pass
+                self.chart_tabs_bar._schedule_reflow()
             except Exception:
                 pass
 
-        self.chart_tabs_bar.bind("<Configure>", _update_tabs_scrollbars, add="+")
-        tabs_canvas.bind("<Configure>", lambda e: (tabs_canvas.itemconfigure(tabs_window, width=int(e.width)), _update_tabs_scrollbars()), add="+")
+        self.chart_tabs_bar.bind("<Configure>", _update_tabs_layout, add="+")
+
+        # RIGHT: Page container for charts (fills remaining space)
+        self.chart_pages_container = ttk.Frame(charts_layout)
+        self.chart_pages_container.pack(side="right", fill="both", expand=True)
 
 
         self._chart_tab_buttons: Dict[str, ttk.Button] = {}
@@ -3212,6 +3775,20 @@ class PowerTraderHub(tk.Tk):
 
         # show initial page
         self._show_chart_page("ACCOUNT")
+        
+        # Force tabs layout update after initial load to ensure all tabs are visible
+        try:
+            self.after_idle(lambda: self.chart_tabs_bar._schedule_reflow())
+        except Exception:
+            pass
+        
+        # Verify all chart tabs were created
+        try:
+            expected = len(self.coins) + 1  # coins + ACCOUNT
+            if len(self._chart_tab_buttons) != expected:
+                print(f"Warning: Chart tabs mismatch - expected {expected}, got {len(self._chart_tab_buttons)}")
+        except Exception:
+            pass
 
 
 
@@ -3941,6 +4518,30 @@ class PowerTraderHub(tk.Tk):
         # Otherwise, toggle means "start"
         self.start_all_scripts()
 
+    def _toggle_neural(self) -> None:
+        """Toggle Neural Levels section collapse/expand."""
+        collapsed = self.neural_collapsed.get()
+        if collapsed:
+            self.neural_content.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+            self.neural_toggle_btn.config(text="▼ Neural Levels (0–7)")
+            self.neural_collapsed.set(False)
+        else:
+            self.neural_content.pack_forget()
+            self.neural_toggle_btn.config(text="► Neural Levels (0–7)")
+            self.neural_collapsed.set(True)
+
+    def _toggle_logs(self) -> None:
+        """Toggle Live Output section collapse/expand."""
+        collapsed = self.logs_collapsed.get()
+        if collapsed:
+            self.logs_content.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+            self.logs_toggle_btn.config(text="▼ Live Output")
+            self.logs_collapsed.set(False)
+        else:
+            self.logs_content.pack_forget()
+            self.logs_toggle_btn.config(text="► Live Output")
+            self.logs_collapsed.set(True)
+
     def _read_runner_ready(self) -> Dict[str, Any]:
         try:
             if os.path.isfile(self.runner_ready_path):
@@ -3978,11 +4579,11 @@ class PowerTraderHub(tk.Tk):
             pass
 
     def start_all_scripts(self) -> None:
-        # Enforce flow: Train → Neural → (wait for runner READY) → Trader
+        # Enforce flow: Train All → (wait 5ms) → Neural → (wait 5ms) → Trader
         all_trained = all(self._coin_is_trained(c) for c in self.coins) if self.coins else False
         
         if not all_trained:
-            # Start training first automatically
+            # Start training first, then wait and start neural, then wait and start trader
             messagebox.showinfo(
                 "Starting Training",
                 "Not all coins are trained. Starting training now.\n\nAfter training completes, Neural Runner and Trader will start automatically."
@@ -3991,12 +4592,23 @@ class PowerTraderHub(tk.Tk):
             self.train_all_coins()
             return
 
+        # All trained - start Neural immediately, then Trader after delay
         self._auto_start_trader_pending = True
+        
+        # Step 1: Start Neural Runner
         self.start_neural()
-
-        # Wait for runner to signal readiness before starting trader
+        
+        # Step 2: Wait 5ms then poll for runner ready and start trader
         try:
-            self.after(250, self._poll_runner_ready_then_start_trader)
+            self.after(5, self._poll_runner_ready_then_start_trader)
+        except Exception:
+            pass
+
+    def _start_neural_then_trader(self) -> None:
+        """Helper to start neural runner, wait 5ms, then start trader (used after training completes)."""
+        self.start_neural()
+        try:
+            self.after(5, self._poll_runner_ready_then_start_trader)
         except Exception:
             pass
 
@@ -4100,18 +4712,54 @@ class PowerTraderHub(tk.Tk):
         self.start_trainer_for_selected_coin()
 
     def train_all_coins(self) -> None:
-        # Start trainers for every coin (in parallel)
-        for c in self.coins:
-            self.trainer_coin_var.set(c)
-            self.start_trainer_for_selected_coin()
+        """Start trainers for every coin in parallel without blocking the GUI."""
+        # Stop the Neural Runner once before starting any training
+        self.stop_neural()
+        
+        def launch_all_trainers() -> None:
+            """Background thread to launch all trainer subprocesses."""
+            try:
+                threads = []
+                for c in self.coins:
+                    def start_trainer(coin: str) -> None:
+                        try:
+                            self._start_single_trainer(coin)
+                        except Exception as e:
+                            print(f"Error starting trainer for {coin}: {e}")
+                    
+                    t = threading.Thread(target=start_trainer, args=(c,), daemon=True)
+                    t.start()
+                    threads.append(t)
+                    # Small delay between launches to avoid resource contention
+                    time.sleep(0.1)
+                
+                # Wait for all launches to complete (in background thread, not GUI)
+                for t in threads:
+                    t.join(timeout=5.0)
+            except Exception as e:
+                print(f"Error in train_all_coins: {e}")
+        
+        # Launch everything in a single background thread to avoid freezing the GUI
+        launcher = threading.Thread(target=launch_all_trainers, daemon=True)
+        launcher.start()
 
     def start_trainer_for_selected_coin(self) -> None:
+        """Start trainer for the currently selected coin (stops neural first)."""
         coin = (self.trainer_coin_var.get() or "").strip().upper()
         if not coin:
             return
 
         # Stop the Neural Runner before any training starts (training modifies artifacts the runner reads)
         self.stop_neural()
+        
+        # Start the trainer
+        self._start_single_trainer(coin)
+    
+    def _start_single_trainer(self, coin: str) -> None:
+        """Internal method to start a trainer for a specific coin (no neural stop)."""
+        coin = coin.strip().upper()
+        if not coin:
+            return
 
         # --- IMPORTANT ---
         # Match the trader's folder convention:
@@ -4502,24 +5150,64 @@ class PowerTraderHub(tk.Tk):
         status_map = self._training_status_map()
         all_trained = all(v == "TRAINED" for v in status_map.values()) if status_map else False
 
-        # Auto-start runner after training completes if flag is set
+        # Update training progress bar
+        try:
+            if hasattr(self, "training_progress") and hasattr(self, "training_progress_label"):
+                total_coins = len(status_map) if status_map else 1
+                trained_count = sum(1 for v in status_map.values() if v == "TRAINED") if status_map else 0
+                training_count = sum(1 for v in status_map.values() if v == "TRAINING") if status_map else 0
+                
+                # Calculate overall progress including partial progress of training coins
+                total_progress = float(trained_count)
+                training_details = []
+                for c in self.coins:
+                    if status_map.get(c) == "TRAINING":
+                        try:
+                            folder = self.coin_folders.get(c, self.project_dir)
+                            status_file = os.path.join(folder, "trainer_status.json")
+                            
+                            # Read with fresh file handle each time
+                            if os.path.exists(status_file):
+                                with open(status_file, "r", encoding="utf-8") as f:
+                                    st = json.load(f)
+                                coin_progress = int(st.get("progress_pct", 0)) if st and isinstance(st, dict) else 0
+                                coin_progress = max(0, min(99, coin_progress))  # Clamp to 0-99
+                                total_progress += (coin_progress / 100.0)
+                                if coin_progress > 0:
+                                    training_details.append(f"{c} {coin_progress}%")
+                                else:
+                                    training_details.append(f"{c} 0%")
+                            else:
+                                training_details.append(f"{c} starting...")
+                        except Exception as e:
+                            training_details.append(f"{c} 0%")
+                
+                progress_pct = min(100, max(0, int((total_progress / total_coins) * 100))) if total_coins > 0 else 0
+                try:
+                    self.training_progress["value"] = progress_pct
+                except Exception:
+                    pass
+                
+                if training_count > 0:
+                    details = ", ".join(training_details) if training_details else f"{training_count} in progress"
+                    self.training_progress_label.config(text=f"Training: {progress_pct}% ({details})")
+                elif progress_pct == 100:
+                    self.training_progress_label.config(text=f"Training: {progress_pct}% (Complete)")
+                else:
+                    self.training_progress_label.config(text=f"Training Progress: {progress_pct}% ({total_coins - trained_count} not trained)")
+        except Exception:
+            pass
+
+        # Auto-start runner after training completes if flag is set (with 5ms delays between steps)
         if all_trained and self._auto_start_runner_after_training:
             self._auto_start_runner_after_training = False
             self._auto_start_trader_pending = True
-            self.start_neural()
-            try:
-                self.after(250, self._poll_runner_ready_then_start_trader)
-            except Exception:
-                pass
+            # Wait 5ms after training completes, then start neural
+            self.after(5, self._start_neural_then_trader)
 
-        # Disable Start All until training is done (but always allow it if something is already running/pending,
-        # so the user can still stop everything).
-        can_toggle_all = True
-        if (not all_trained) and (not neural_running) and (not trader_running) and (not self._auto_start_trader_pending):
-            can_toggle_all = False
-
+        # Start All button is always enabled - start_all_scripts() handles training requirement
         try:
-            self.btn_toggle_all.configure(state=("normal" if can_toggle_all else "disabled"))
+            self.btn_toggle_all.configure(state="normal")
         except Exception:
             pass
 
@@ -4535,17 +5223,30 @@ class PowerTraderHub(tk.Tk):
             else:
                 self.lbl_training_overview.config(text="Training: READY (all trained)")
 
-            # show each coin status (ONLY redraw the list if it actually changed)
-            sig = tuple((c, status_map.get(c, "N/A")) for c in self.coins)
+            # show each coin status with progress for training coins (ONLY redraw if changed)
+            progress_map = {}
+            for c in self.coins:
+                if status_map.get(c) == "TRAINING":
+                    try:
+                        folder = self.coin_folders.get(c, self.project_dir)
+                        st = _safe_read_json(os.path.join(folder, "trainer_status.json"))
+                        progress_map[c] = st.get("progress_pct", 0) if st else 0
+                    except Exception:
+                        progress_map[c] = 0
+            
+            sig = tuple((c, status_map.get(c, "N/A"), progress_map.get(c, 0)) for c in self.coins)
             if getattr(self, "_last_training_sig", None) != sig:
                 self._last_training_sig = sig
                 self.training_list.delete(0, "end")
-                for c, st in sig:
-                    self.training_list.insert("end", f"{c}: {st}")
+                for c, st, pct in sig:
+                    if st == "TRAINING" and pct > 0:
+                        self.training_list.insert("end", f"{c}: {st} ({pct}%)")
+                    else:
+                        self.training_list.insert("end", f"{c}: {st}")
 
             # show gating hint (Start All handles the runner->ready->trader sequence)
             if not all_trained:
-                self.lbl_flow_hint.config(text="Flow: Train All required → then Start All")
+                self.lbl_flow_hint.config(text="Flow: Train All → then Start All")
             elif self._auto_start_trader_pending:
                 self.lbl_flow_hint.config(text="Flow: Starting runner → waiting for ready → trader will auto-start")
             elif neural_running or trader_running:
@@ -4720,8 +5421,20 @@ class PowerTraderHub(tk.Tk):
             self.lbl_acct_holdings_value.config(
                 text=f"Holdings Value: {_fmt_money(acct.get('holdings_sell_value', None))}"
             )
+            
+            # Buying power with deficit warning in red
+            buying_power = acct.get('buying_power', None)
+            bp_text = f"Buying Power: {_fmt_money(buying_power)}"
+            is_deficit = False
+            try:
+                if buying_power is not None and float(buying_power) < 0:
+                    bp_text += " ***Deficit**"
+                    is_deficit = True
+            except Exception:
+                pass
             self.lbl_acct_buying_power.config(
-                text=f"Buying Power: {_fmt_money(acct.get('buying_power', None))}"
+                text=bp_text,
+                foreground="red" if is_deficit else DARK_FG
             )
 
             pit = acct.get("percent_in_trade", None)
@@ -5278,53 +5991,30 @@ class PowerTraderHub(tk.Tk):
         except Exception:
             pass
 
-        # Recreate
-        self.chart_pages_container = ttk.Frame(charts_frame)
-        self.chart_pages_container.pack(fill="both", expand=True, padx=6, pady=(6, 0))
+        # Recreate - side-by-side layout: tabs on left, charts on right
+        charts_layout = ttk.Frame(charts_frame)
+        charts_layout.pack(fill="both", expand=True, padx=6, pady=6)
 
-        tabs_viewport = ttk.Frame(charts_frame)
-        tabs_viewport.pack(fill="x", padx=6, pady=(0, 6))
+        # LEFT: Tabs bar (vertical stack of buttons)
+        tabs_viewport = ttk.Frame(charts_layout)
+        tabs_viewport.pack(side="left", fill="y", padx=(0, 6))
 
-        tabs_canvas = tk.Canvas(tabs_viewport, height=36, bg=DARK_BG, highlightthickness=0, bd=0)
-        tabs_canvas.pack(side="top", fill="x", expand=True)
+        # Use WrapFrame in vertical orientation for stacked tab buttons
+        self.chart_tabs_bar = WrapFrame(tabs_viewport, orientation="vertical")
+        self.chart_tabs_bar.pack(fill="both", expand=True)
 
-        tabs_scroll = ttk.Scrollbar(tabs_viewport, orient="horizontal", command=tabs_canvas.xview)
-        tabs_canvas.configure(xscrollcommand=tabs_scroll.set)
-
-        self.chart_tabs_bar = WrapFrame(tabs_canvas, orientation="horizontal")
-        tabs_window = tabs_canvas.create_window((0, 0), window=self.chart_tabs_bar, anchor="nw")
-
-        def _update_tabs_scrollbars(event=None) -> None:
+        # Update function to ensure tabs are laid out properly
+        def _update_tabs_layout(event=None) -> None:
             try:
-                c = tabs_canvas
-                win_id = tabs_window
-                c.update_idletasks()
-                bbox = c.bbox(win_id)
-                if not bbox:
-                    try:
-                        tabs_scroll.pack_forget()
-                    except Exception:
-                        pass
-                    return
-                c.configure(scrollregion=bbox)
-                content_w = int(bbox[2] - bbox[0])
-                view_w = int(c.winfo_width())
-                if content_w > (view_w + 1):
-                    try:
-                        tabs_scroll.pack(side="bottom", fill="x")
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        tabs_scroll.pack_forget()
-                        c.xview_moveto(0)
-                    except Exception:
-                        pass
+                self.chart_tabs_bar._schedule_reflow()
             except Exception:
                 pass
 
-        self.chart_tabs_bar.bind("<Configure>", _update_tabs_scrollbars, add="+")
-        tabs_canvas.bind("<Configure>", lambda e: (tabs_canvas.itemconfigure(tabs_window, width=int(e.width)), _update_tabs_scrollbars()), add="+")
+        self.chart_tabs_bar.bind("<Configure>", _update_tabs_layout, add="+")
+
+        # RIGHT: Page container for charts (fills remaining space)
+        self.chart_pages_container = ttk.Frame(charts_layout)
+        self.chart_pages_container.pack(side="right", fill="both", expand=True)
 
         self._chart_tab_buttons = {}
         self.chart_pages = {}
@@ -5550,6 +6240,41 @@ class PowerTraderHub(tk.Tk):
         add_row(r, "Main neural folder:", main_dir_var, browse="dir"); r += 1
         add_row(r, "Coins (comma):", coins_var); r += 1
         add_row(r, "Hub data dir (optional):", hub_dir_var, browse="dir"); r += 1
+
+        # Neural timeframes selection (independent checkboxes)
+        ttk.Label(frm, text="Neural level timeframes:").grid(row=r, column=0, sticky="nw", padx=(0, 10), pady=6)
+        
+        neural_frame = ttk.Frame(frm)
+        neural_frame.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
+        
+        all_tfs = ["1min", "5min", "15min", "30min", "1hour", "2hour", "4hour", "8hour", "12hour", "1day", "1week"]
+        current_neural_tfs = self.settings.get("neural_timeframes", ["1hour", "2hour", "4hour", "8hour", "12hour", "1day", "1week"])
+        
+        neural_tf_vars = {}
+        for i, tf in enumerate(all_tfs):
+            var = tk.BooleanVar(value=(tf in current_neural_tfs))
+            neural_tf_vars[tf] = var
+            cb = ttk.Checkbutton(neural_frame, text=tf, variable=var)
+            cb.grid(row=i // 4, column=i % 4, sticky="w", padx=4, pady=2)
+        
+        r += 1
+        
+        # Neural levels range (0-7)
+        ttk.Label(frm, text="Neural levels range:").grid(row=r, column=0, sticky="w", padx=(0, 10), pady=6)
+        
+        range_frame = ttk.Frame(frm)
+        range_frame.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
+        
+        neural_min_var = tk.StringVar(value=str(self.settings.get("neural_levels_min", 0)))
+        neural_max_var = tk.StringVar(value=str(self.settings.get("neural_levels_max", 7)))
+        
+        ttk.Label(range_frame, text="Min (0-7):").pack(side="left", padx=(0, 4))
+        ttk.Entry(range_frame, textvariable=neural_min_var, width=5).pack(side="left", padx=(0, 12))
+        ttk.Label(range_frame, text="Max (0-7):").pack(side="left", padx=(0, 4))
+        ttk.Entry(range_frame, textvariable=neural_max_var, width=5).pack(side="left")
+        ttk.Label(range_frame, text="(controls which levels N0-N7 to use)", foreground=DARK_MUTED).pack(side="left", padx=(12, 0))
+        
+        r += 1
 
         ttk.Separator(frm, orient="horizontal").grid(row=r, column=0, columnspan=3, sticky="ew", pady=10); r += 1
 
@@ -7445,6 +8170,25 @@ class PowerTraderHub(tk.Tk):
                 self.settings["ui_refresh_seconds"] = float(ui_refresh_var.get().strip())
                 self.settings["chart_refresh_seconds"] = float(chart_refresh_var.get().strip())
                 self.settings["candles_limit"] = int(float(candles_limit_var.get().strip()))
+                
+                # Save selected neural timeframes
+                selected_tfs = [tf for tf, var in neural_tf_vars.items() if var.get()]
+                if not selected_tfs:
+                    selected_tfs = ["1hour"]  # ensure at least one is selected
+                self.settings["neural_timeframes"] = selected_tfs
+                
+                # Save neural levels range
+                try:
+                    min_level = max(0, min(7, int(neural_min_var.get().strip())))
+                    max_level = max(0, min(7, int(neural_max_var.get().strip())))
+                    if min_level > max_level:
+                        min_level, max_level = max_level, min_level
+                    self.settings["neural_levels_min"] = min_level
+                    self.settings["neural_levels_max"] = max_level
+                except Exception:
+                    self.settings["neural_levels_min"] = 0
+                    self.settings["neural_levels_max"] = 7
+                
                 self.settings["auto_start_scripts"] = bool(auto_start_var.get())
                 self.settings["use_kucoin_api"] = bool(kucoin_var.get())
                 self.settings["use_robinhood_api"] = bool(robinhood_var.get())

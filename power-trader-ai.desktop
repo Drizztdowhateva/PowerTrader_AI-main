@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Power Trader AI
+Comment=AI-powered cryptocurrency trading platform
+Exec=python3 /home/blackmox/code/python/PowerTrader_AI-main/pt_hub.py
+Path=/home/blackmox/code/python/PowerTrader_AI-main
+Icon=/home/blackmox/code/python/PowerTrader_AI-main/PowerTrader.png
+Terminal=false
+Categories=Finance;Office;
+Keywords=trading;crypto;bitcoin;AI;
+StartupWMClass=powertraderai
+StartupNotify=true
+
+

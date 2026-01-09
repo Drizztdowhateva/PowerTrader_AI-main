@@ -410,6 +410,8 @@ class CryptoAPITrading:
           N1 = 1st blue line (top)
           ...
           N7 = 7th blue line (bottom)
+          
+        Filters levels based on neural_levels_min and neural_levels_max from settings.
         """
         sym = str(symbol).upper().strip()
         folder = base_paths.get(sym, main_dir if sym == "BTC" else os.path.join(main_dir, sym))
@@ -443,6 +445,20 @@ class CryptoAPITrading:
                 seen.add(k)
                 out.append(float(v))
             out.sort(reverse=True)
+            
+            # Apply neural levels range filter from settings
+            try:
+                settings_path = os.path.join(os.path.dirname(__file__), "gui_settings.json")
+                if os.path.isfile(settings_path):
+                    with open(settings_path, "r", encoding="utf-8") as f:
+                        settings = json.load(f) or {}
+                    min_level = max(0, int(settings.get("neural_levels_min", 0)))
+                    max_level = min(len(out) - 1, int(settings.get("neural_levels_max", 7)))
+                    if min_level <= max_level and max_level < len(out):
+                        out = out[min_level:max_level + 1]
+            except Exception:
+                pass
+            
             return out
         except Exception:
             return []
@@ -945,9 +961,26 @@ class CryptoAPITrading:
         # Calculate total account value (robust: never drop a held coin to $0 on transient API misses)
         snapshot_ok = True
 
-        # buying power
+        # buying power - try multiple field names for Robinhood API compatibility
         try:
-            buying_power = float(account.get("buying_power", 0))
+            # Try common field names
+            buying_power = None
+            if isinstance(account, dict):
+                # Check if response has results array
+                if "results" in account and isinstance(account["results"], list) and len(account["results"]) > 0:
+                    acct_data = account["results"][0]
+                else:
+                    acct_data = account
+                
+                # Try various field names
+                for field in ["buying_power", "cash", "cash_balance", "available_cash", "buying_power_amount"]:
+                    if field in acct_data and acct_data[field] is not None:
+                        buying_power = float(acct_data[field])
+                        break
+            
+            if buying_power is None:
+                buying_power = 0.0
+                snapshot_ok = False
         except Exception:
             buying_power = 0.0
             snapshot_ok = False

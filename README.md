@@ -133,7 +133,9 @@ Training builds the system’s coin “memory” so it can generate signals.
 
 1. In the Hub, click **Train All**.
 2. Wait until training finishes.
+**Multithreading Support:** All coins train simultaneously in parallel for faster completion!
 
+![Multithreading](pngfiles/MultiThreading.png)
 ---
 
 ## Step 7 — Start the system (inside the Hub)

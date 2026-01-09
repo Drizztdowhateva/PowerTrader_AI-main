@@ -37,11 +37,17 @@
   "exchange_robinhood_enabled": true,
   "exchange_kucoin_enabled": false,
   "use_robinhood_api": true,
-  "window_geometry": "1680x1018+0+0",
+  "window_geometry": "1680x949+-20+-16",
   "pane_sashes": {
-    "outer": 554,
-    "left_split": 774,
-    "right_split": 437,
-    "right_bottom_split": 316
-  }
+    "outer": 628,
+    "right_split": 376,
+    "right_bottom_split": 311,
+    "left_split": 731
+  },
+  "neural_levels_count": 7,
+  "neural_timeframes": [
+    "1min"
+  ],
+  "neural_levels_min": 1,
+  "neural_levels_max": 7
 }
