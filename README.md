@@ -1,26 +1,11 @@
 Fully automated crypto trading powered by a custom price prediction AI and a structured/tiered DCA system.
 
 ## Recent changes
+- **NEW**: Added support for multiple exchange APIs! Now supports KuCoin, Binance, Coinbase, and CoinGecko for market data, plus Binance and Coinbase for trading. See [API_PROVIDERS_GUIDE.md](API_PROVIDERS_GUIDE.md) for configuration details.
 - Fixed trainer status updates so the hub correctly shows which coin is actively training.
 - Streamlined path handling to be cross-platform (macOS / Linux / Windows).
 
-This is my personal trading bot that I decided to make open source. I made this strategy to match my personal goals. This system is meant to be a foundation/framework for you to build your dream bot!
-
-I know there are "commonly essential" trading features that are missing (like no stop loss for example). This is by design.
-
-I do not believe in selling worthwhile coins at a loss (and why would you trade anything besides worthwhile coins with a trading bot, anyways???).
-
-I DO believe in crypto. I'd rather just wait and maybe add more money to my account if need be so that the bot can buy even more of the coin while the price is down.
-
-I am not selling anything. This trading bot is not a product. This system is for experimentation and education. The only reason you would EVER send me money is if you are voluntarily donating (donation routes can be found at the bottom of this readme :) ). Do not fall for any scams! PowerTrader AI is COMPLETELY FREE FOREVER!
-
 IMPORTANT: This software places real trades automatically. You are responsible for everything it does to your money and your account. Keep your API keys private. I am not giving financial advice. I am not responsible for any losses incurred or any security breaches to your computer (the code is entirely open source and can be confirmed non-malicious). You are fully responsible for doing your own due diligence to learn and understand this trading system and to use it properly. You are fully responsible for all of your money and all of the bot's actions, and any gains or losses.
-
-“It’s an instance-based (kNN/kernel-style) predictor with online per-instance reliability weighting, used as a multi-timeframe trading signal.” - ChatGPT on the type of AI used in this trading bot.
-
-So what exactly does that mean?
-
-When people think AI, they usually think about LLM style AIs and neural networks. What many people don't realize is there are many types of Artificial Intelligence and Machine Learning - and the one in my trading system falls under the "Other" category.
 
 When training for a coin, it goes through the entire history for that coin on multiple timeframes and saves each pattern it sees, along with what happens on the next candle AFTER the pattern. It uses these saved patterns to generate a predicted candle by taking a weighted average of the closest matches in memory to the current pattern in time. This weighted average output is done once for each timeframe, from 1 hour up to 1 week. Each timeframe gets its own predicted candle. The low and high prices from these candles are what are shown as the blue and orange horizontal lines on the price charts. 
 
@@ -95,8 +80,6 @@ From the same Command Prompt window (inside your PowerTrader folder), run:
 The app that opens is the **PowerTrader Hub**.  
 This is the only thing you need to run day-to-day.
 
-**Note:** You may have to run in fullscreen to see all tabs, or you can drag the bars to reveal the tabs. Full Screen is the best view. The window layout is not saving yet - this is a known issue.
-
 ---
 
 ## Step 5 — Set your folder, coins, and Robinhood keys (inside the Hub)
@@ -133,9 +116,7 @@ Training builds the system’s coin “memory” so it can generate signals.
 
 1. In the Hub, click **Train All**.
 2. Wait until training finishes.
-**Multithreading Support:** All coins train simultaneously in parallel for faster completion!
 
-![Multithreading](pngfiles/MultiThreading.png)
 ---
 
 ## Step 7 — Start the system (inside the Hub)
@@ -165,18 +146,40 @@ A TRADE WILL START FOR A COIN IF THAT COIN REACHES A LONG LEVEL OF 3 OR HIGHER W
 1. Open **Settings**
 2. Add one new coin
 3. Save
-4. Click **Train All**, wait for training to comHere is a super clean version refined without stuckplete
+4. Click **Train All**, wait for training to complete
 5. Click **Start All**
 
 ---
 
-## Donate
+## Using Different Exchange APIs
 
-PowerTrader AI is COMPLETELY free and open source! If you want to support the project:
+PowerTrader AI supports multiple exchanges for market data and trading! By default, it uses:
+- **KuCoin** for market data (free, no API key needed)
+- **Robinhood** for trading (US-only)
 
-- Cash App: **$garagesteve**
-- PayPal: **@garagesteve**
-- Patreon: **patreon.com/MakingMadeEasy**
+You can switch to other providers like **Binance**, **Coinbase**, or use **CoinGecko** as a fallback.
+
+### Quick Setup
+
+1. **Edit `gui_settings.json`** and add:
+   ```json
+   {
+     "market_data_provider": "binance",
+     "trading_provider": "robinhood"
+   }
+   ```
+
+2. **For trading with other exchanges**, set environment variables:
+   ```bash
+   export BINANCE_API_KEY="your_key"
+   export BINANCE_API_SECRET="your_secret"
+   ```
+
+For complete instructions on configuring different exchanges, see **[API_PROVIDERS_GUIDE.md](API_PROVIDERS_GUIDE.md)**.
+
+**Supported Providers:**
+- Market Data: KuCoin, Binance, Binance US, Coinbase, CoinGecko
+- Trading: Robinhood, Binance, Binance US, Coinbase
 
 ---
 

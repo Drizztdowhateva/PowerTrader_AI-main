@@ -44,21 +44,22 @@ class _WrapItem:
     pady: Tuple[int, int] = (0, 0)
 
 
-class WrapFrame(ttk.Frame):
 
-    def __init__(self, parent, **kwargs):
+from typing import Tuple, List
+
+class WrapFrame(ttk.Frame):
+    def __init__(self, parent: tk.Widget, **kwargs) -> None:
         super().__init__(parent, **kwargs)
         self._items: List[_WrapItem] = []
-        self._reflow_pending = False
-        self._in_reflow = False
+        self._reflow_pending: bool = False
+        self._in_reflow: bool = False
         self.bind("<Configure>", self._schedule_reflow)
 
-    def add(self, widget: tk.Widget, padx=(0, 0), pady=(0, 0)) -> None:
+    def add(self, widget: tk.Widget, padx: Tuple[int, int] = (0, 0), pady: Tuple[int, int] = (0, 0)) -> None:
         self._items.append(_WrapItem(widget, padx=padx, pady=pady))
         self._schedule_reflow()
 
     def clear(self, destroy_widgets: bool = True) -> None:
-
         for it in list(self._items):
             try:
                 it.w.grid_forget()
@@ -72,7 +73,7 @@ class WrapFrame(ttk.Frame):
         self._items = []
         self._schedule_reflow()
 
-    def _schedule_reflow(self, event=None) -> None:
+    def _schedule_reflow(self, event: object = None) -> None:
         if self._reflow_pending:
             return
         self._reflow_pending = True
@@ -1584,6 +1585,11 @@ class PowerTraderHub(tk.Tk):
 
         self.settings = self._load_settings()
 
+        enabled_platforms = [p for p in ['kucoin', 'binance', 'binance_us', 'coinbase'] if self.settings.get('enabled_platforms', {}).get(p, False)]
+        if hasattr(self, 'market_platform_var'):
+            self.market_platform_var.set(enabled_platforms[0] if enabled_platforms else '')
+            self.market_platform_combo['values'] = enabled_platforms
+
         self.project_dir = os.path.abspath(os.path.dirname(__file__))
 
         # hub data dir
@@ -2309,6 +2315,20 @@ class PowerTraderHub(tk.Tk):
         ttk.Button(train_buttons_row, text="Train Selected", width=BTN_W, command=self.train_selected_coin).pack(anchor="w", pady=(0, 6))
         ttk.Button(train_buttons_row, text="Train All", width=BTN_W, command=self.train_all_coins).pack(anchor="w")
 
+
+
+        # --- Training progress bar and label at the very top of the control pane ---
+        self.train_all_progress_frame = ttk.Frame(top_controls)
+        self.train_all_progress_frame.pack(fill="x", padx=6, pady=(4, 2), before=top_controls.winfo_children()[0] if top_controls.winfo_children() else None)
+
+        self.train_all_progress_label = ttk.Label(self.train_all_progress_frame, text="", anchor="w", font=("", 9, "bold"))
+        self.train_all_progress_label.pack(fill="x", padx=0, pady=(0, 1))
+
+        style = ttk.Style()
+        style.configure("Small.Horizontal.TProgressbar", thickness=8)
+        self.train_all_progress = ttk.Progressbar(self.train_all_progress_frame, orient="horizontal", length=160, mode="determinate", style="Small.Horizontal.TProgressbar")
+        self.train_all_progress.pack(fill="x", padx=0, pady=(0, 0))
+
         # Training status (per-coin + gating reason)
         self.lbl_training_overview = ttk.Label(training_left, text="Training: N/A")
         self.lbl_training_overview.pack(anchor="w", padx=6, pady=(0, 2))
@@ -2564,6 +2584,16 @@ class PowerTraderHub(tk.Tk):
             width=8
         )
         self.trainer_coin_combo.pack(side="left", padx=(6, 12))
+
+        self.market_platform_var = tk.StringVar()
+        ttk.Label(top_bar, text="Market:").pack(side="left", padx=(12, 0))
+        self.market_platform_combo = ttk.Combobox(
+            top_bar,
+            textvariable=self.market_platform_var,
+            state="readonly",
+            width=10
+        )
+        self.market_platform_combo.pack(side="left", padx=(6, 12))
 
         ttk.Button(top_bar, text="Start Trainer", command=self.start_trainer_for_selected_coin).pack(side="left")
         ttk.Button(top_bar, text="Stop Trainer", command=self.stop_trainer_for_selected_coin).pack(side="left", padx=(6, 0))
@@ -3395,13 +3425,12 @@ class PowerTraderHub(tk.Tk):
         self.start_trainer_for_selected_coin()
 
     def train_all_coins(self) -> None:
-        """Start training all coins with controlled concurrency to prevent resource exhaustion."""
+        """Start training all coins."""
         # Stop the Neural Runner before any training starts (training modifies artifacts the runner reads)
         self.stop_neural()
 
-        # Get max concurrent trainings from settings (default to 2 to be conservative)
-        max_concurrent = int(self.settings.get("max_concurrent_trainings", 2))
-        max_concurrent = max(1, min(max_concurrent, len(self.coins)))
+        # For Train All, allow starting all coins at once
+        max_concurrent = len(self.coins)
 
         # Count currently running trainers
         running_count = sum(1 for lp in self.trainers.values() if lp.info.proc and lp.info.proc.poll() is None)
@@ -3439,6 +3468,12 @@ class PowerTraderHub(tk.Tk):
             self.status.config(text=f"Started training {started} coins. {remaining} queued (max concurrent: {max_concurrent})")
         else:
             self.status.config(text=f"Started training all {started} coins")
+
+        # Always schedule the training queue checker so queued coins are started as soon as possible
+        try:
+            self.after(100, self._check_training_queue)
+        except Exception:
+            pass
 
     def start_trainer_for_selected_coin(self) -> None:
         coin = (self.trainer_coin_var.get() or "").strip().upper()
@@ -3497,6 +3532,7 @@ class PowerTraderHub(tk.Tk):
 
         env = os.environ.copy()
         env["POWERTRADER_HUB_DIR"] = self.hub_dir
+        env["POWERTRADER_MARKET_PLATFORM"] = self.market_platform_var.get()
 
         try:
             # IMPORTANT: pass `coin` so neural_trainer trains the correct market instead of defaulting to BTC
@@ -3873,6 +3909,41 @@ class PowerTraderHub(tk.Tk):
                 self.lbl_training_overview.config(text=f"Training: REQUIRED ({len(not_trained)} not trained)")
             else:
                 self.lbl_training_overview.config(text="Training: READY (all trained)")
+
+
+
+            # Compose per-coin percentages string and update label
+            total = len(self.coins)
+            completed = 0
+            percent_map = {}
+            for c in self.coins:
+                st = status_map.get(c, "N/A")
+                percent = 0
+                if st == "TRAINED":
+                    percent = 100
+                    completed += 1
+                elif st == "TRAINING":
+                    folder = self.coin_folders.get(c, "")
+                    prog = 0
+                    try:
+                        status_path = os.path.join(folder, "trainer_status.json")
+                        if os.path.isfile(status_path):
+                            with open(status_path, "r", encoding="utf-8") as f:
+                                j = json.load(f)
+                                prog = int(j.get("progress", 0))
+                                percent = max(0, min(100, prog))
+                    except Exception:
+                        percent = 0
+                percent_map[c] = percent
+            if hasattr(self, "train_all_progress_label"):
+                pct_str = "  ".join(f"{c}: {percent_map[c]}%" for c in self.coins)
+                self.train_all_progress_label.config(text=pct_str)
+            # Update overall progress bar
+            if hasattr(self, "train_all_progress"):
+                if total > 0:
+                    self.train_all_progress['value'] = int((sum(percent_map.values()) / (total * 100)) * 100)
+                else:
+                    self.train_all_progress['value'] = 0
 
             # show each coin status (ONLY redraw the list if it actually changed)
             sig = tuple((c, status_map.get(c, "N/A")) for c in self.coins)
@@ -4737,6 +4808,13 @@ class PowerTraderHub(tk.Tk):
     # ---- settings dialog ----
 
     def open_settings_dialog(self) -> None:
+        def on_close():
+            # Save settings on close (auto-save)
+            try:
+                save()
+            except Exception:
+                win.destroy()
+
 
         win = tk.Toplevel(self)
         win.title("Settings")
@@ -4893,9 +4971,8 @@ class PowerTraderHub(tk.Tk):
 
         r += 1
 
-        btns = ttk.Frame(frm)
-        btns.grid(row=r, column=0, columnspan=3, sticky="ew", pady=14)
-        btns.columnconfigure(0, weight=1)
+        # Save on window close (X button)
+        win.protocol("WM_DELETE_WINDOW", on_close)
 
         def save():
             try:
@@ -4963,6 +5040,13 @@ class PowerTraderHub(tk.Tk):
 
 
     def open_platform_settings_dialog(self) -> None:
+        def on_close():
+            # Save platform settings on close (auto-save)
+            try:
+                save()
+            except Exception:
+                win.destroy()
+
         """Open the platform settings dialog."""
         win = tk.Toplevel(self)
         win.title("Platform Settings")
@@ -5068,13 +5152,59 @@ class PowerTraderHub(tk.Tk):
         
         pr = 0
         pc = 0
+        self._platform_status_labels = {}
+
+        def update_platform_status_labels():
+            for idx, platform in enumerate(["kucoin", "binance", "binance_us", "coinbase", "coingecko", "robinhood"]):
+                key_types = []
+                if platform == "robinhood":
+                    key_types = ["api_key", "private_key"]
+                elif platform == "coingecko":
+                    key_types = []  # No API key needed
+                else:
+                    key_types = ["api_key", "secret"]
+
+                status_confirmed = False
+                if not key_types:
+                    status_text = "Status Confirmed"
+                else:
+                    for key_type in key_types:
+                        try:
+                            key_val = _get_api_key(platform, key_type)
+                            if key_val:
+                                status_confirmed = True
+                                break
+                        except Exception:
+                            pass
+                    status_text = "Status Confirmed" if status_confirmed else "Status Not Confirmed"
+
+                status_fg = DARK_ACCENT if status_confirmed or not key_types else "#FF5555"
+                lbl = self._platform_status_labels.get(platform)
+                if lbl:
+                    lbl.config(text=status_text, foreground=status_fg)
+
         for platform in ["kucoin", "binance", "binance_us", "coinbase", "coingecko", "robinhood"]:
             chk = ttk.Checkbutton(platform_frame, text=platform.title(), variable=platform_vars[platform])
-            chk.grid(row=pr, column=pc, sticky="w", padx=(0, 20), pady=2)
+            chk.grid(row=pr, column=pc * 2, sticky="w", padx=(0, 2), pady=2)
+
+            status_lbl = ttk.Label(platform_frame, text="", foreground=DARK_ACCENT)
+            status_lbl.grid(row=pr, column=pc * 2 + 1, sticky="w", padx=(2, 20), pady=2)
+            self._platform_status_labels[platform] = status_lbl
+
             pc += 1
             if pc >= 3:
                 pc = 0
                 pr += 1
+
+        # Initial status update
+        update_platform_status_labels()
+
+        # Add a refresh button for live update
+        def refresh_status():
+            update_platform_status_labels()
+
+        refresh_btn = ttk.Button(platform_frame, text="Refresh Status", command=refresh_status)
+        refresh_btn.grid(row=pr + 1, column=0, columnspan=6, sticky="w", padx=(0, 2), pady=(4, 2))
         r += 1
         
         # Setup wizards section
@@ -5098,6 +5228,11 @@ class PowerTraderHub(tk.Tk):
                 self._open_coingecko_setup_wizard()
             elif platform == "robinhood":
                 self._open_robinhood_setup_wizard()
+            # After wizard, refresh status labels
+            try:
+                update_platform_status_labels()
+            except Exception:
+                pass
         
         wr = 0
         wc = 0
@@ -5151,15 +5286,19 @@ class PowerTraderHub(tk.Tk):
                 messagebox.showinfo("Keys Cleared", "All API keys have been deleted.")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to clear keys: {e}")
+            # After clearing, refresh status labels
+            try:
+                update_platform_status_labels()
+            except Exception:
+                pass
         
         ttk.Button(keys_frame, text="Open Keys Folder", command=open_keys_folder).grid(row=0, column=0, sticky="w", padx=(0, 10))
         ttk.Button(keys_frame, text="Clear All Keys", command=clear_all_keys).grid(row=0, column=1, sticky="w")
         
         r += 1
 
-        btns = ttk.Frame(frm)
-        btns.grid(row=r, column=0, columnspan=3, sticky="ew", pady=14)
-        btns.columnconfigure(0, weight=1)
+        # Save on window close (X button)
+        win.protocol("WM_DELETE_WINDOW", on_close)
 
         def save():
             try:
@@ -5170,6 +5309,12 @@ class PowerTraderHub(tk.Tk):
                 }
                 
                 self._save_settings()
+
+                # Update market platform combo
+                enabled_platforms = [p for p in ['kucoin', 'binance', 'binance_us', 'coinbase'] if self.settings.get('enabled_platforms', {}).get(p, False)]
+                self.market_platform_combo['values'] = enabled_platforms
+                if self.market_platform_var.get() not in enabled_platforms:
+                    self.market_platform_var.set(enabled_platforms[0] if enabled_platforms else '')
 
                 try:
                     win.lift()

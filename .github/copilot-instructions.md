@@ -15,10 +15,13 @@ Purpose: quick, actionable knowledge to help an AI agent be productive in this r
     - `hub_data/trade_history.jsonl` — newline-delimited trade events (written by `pt_trader.py`).
     - `hub_data/trader_status.json` — runtime trader state.
   - Per-coin folder files (under `main_neural_dir` / coin subfolders):
-    - `memories_<tf>.txt`, `memory_weights_<tf>.txt`, `memory_weights_high_<tf>.txt`, `memory_weights_low_<tf>.txt` (trainer outputs)
-    - `neural_perfect_threshold_<tf>.txt`, `trainer_last_training_time.txt`, `trainer_status.json`
-    - `low_bound_prices.html`, `high_bound_prices.html` (thinker writes predicted levels; parser is tolerant to commas/brackets)
-    - `long_dca_signal.txt`, `short_dca_signal.txt`, and other control flags like `futures_*` files.
+    - `.market/` subfolder — all neural runner output files stored here for organization:
+      - `memories_<tf>.txt`, `memory_weights_<tf>.txt`, `memory_weights_high_<tf>.txt`, `memory_weights_low_<tf>.txt` (trainer outputs, still in coin root)
+      - `.market/low_bound_prices.html`, `.market/high_bound_prices.html` (thinker writes predicted levels; parser is tolerant to commas/brackets)
+      - `.market/long_dca_signal.txt`, `.market/short_dca_signal.txt` — current neural signal levels (0-7)
+      - `.market/futures_long_profit_margin.txt`, `.market/futures_short_profit_margin.txt` — dynamic profit margins
+    - `neural_perfect_threshold_<tf>.txt`, `trainer_last_training_time.txt`, `trainer_status.json` (remain in coin root)
+    - Other control flags like `futures_*` files (moved to `.market/` subfolder).
 
 - Important conventions & patterns
   - BTC uses the `main_neural_dir` root; other coins live in `<main_dir>/<SYMBOL>` when that folder exists. See `build_coin_folders` (in `pt_hub.py`) and `coin_folder` (in `pt_thinker.py`).

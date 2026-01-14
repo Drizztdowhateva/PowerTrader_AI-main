@@ -13,7 +13,70 @@ from colorama import Fore, Style
 import traceback
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives import serialization
+from cryptography.fernet import Fernet
 from pathlib import Path
+
+# Import API abstraction layer
+try:
+	from api_providers import (
+		create_trading_provider,
+		TradingProvider,
+		RobinhoodTrading
+	)
+	HAS_API_PROVIDERS = True
+except ImportError:
+	HAS_API_PROVIDERS = False
+	TradingProvider = None
+	RobinhoodTrading = None
+
+# -----------------------------
+# Encrypted API Keys Management
+# -----------------------------
+API_KEYS_FILE = "api_keys.enc"
+MASTER_KEY_FILE = "master_key.txt"
+
+def _generate_master_key() -> str:
+    """Generate a new master key for encryption."""
+    return base64.urlsafe_b64encode(os.urandom(32)).decode()
+
+def _get_master_key() -> str:
+    """Get or create the master key."""
+    key_path = os.path.join(os.path.dirname(__file__), MASTER_KEY_FILE)
+    if os.path.exists(key_path):
+        with open(key_path, 'r') as f:
+            return f.read().strip()
+    else:
+        key = _generate_master_key()
+        with open(key_path, 'w') as f:
+            f.write(key)
+        # Make the master key file readable only by owner
+        os.chmod(key_path, 0o600)
+        return key
+
+def _get_cipher() -> "Fernet":
+    """Get the Fernet cipher for encryption/decryption."""
+    master_key = _get_master_key()
+    return Fernet(master_key.encode())
+
+def _load_encrypted_api_keys() -> dict:
+    """Load encrypted API keys from file."""
+    keys_file = os.path.join(os.path.dirname(__file__), API_KEYS_FILE)
+    if not os.path.exists(keys_file):
+        return {}
+    
+    try:
+        cipher = _get_cipher()
+        with open(keys_file, 'rb') as f:
+            encrypted_data = f.read()
+        decrypted_data = cipher.decrypt(encrypted_data)
+        return json.loads(decrypted_data.decode())
+    except Exception:
+        return {}
+
+def _get_api_key(provider: str, key_type: str) -> str:
+    """Get a specific API key for a provider."""
+    keys = _load_encrypted_api_keys()
+    return keys.get(provider, {}).get(key_type, "")
 
 # -----------------------------
 # GUI HUB OUTPUTS
@@ -155,32 +218,102 @@ def _refresh_paths_and_symbols():
 
 
 #API STUFF
-API_KEY = ""
-BASE64_PRIVATE_KEY = ""
-
-try:
-    with open('r_key.txt', 'r', encoding='utf-8') as f:
-        API_KEY = (f.read() or "").strip()
-    with open('r_secret.txt', 'r', encoding='utf-8') as f:
-        BASE64_PRIVATE_KEY = (f.read() or "").strip()
-except Exception:
-    API_KEY = ""
-    BASE64_PRIVATE_KEY = ""
+API_KEY = _get_api_key("robinhood", "api_key")
+BASE64_PRIVATE_KEY = _get_api_key("robinhood", "private_key")
 
 if not API_KEY or not BASE64_PRIVATE_KEY:
     print(
         "\n[PowerTrader] Robinhood API credentials not found.\n"
-        "Open the GUI and go to Settings → Robinhood API → Setup / Update.\n"
-        "That wizard will generate your keypair, tell you where to paste the public key on Robinhood,\n"
-        "and will save r_key.txt + r_secret.txt so this trader can authenticate.\n"
+        "Open the GUI and go to Settings → Setup Wizards → Setup Robinhood.\n"
+        "That wizard will help you configure your API credentials securely.\n"
     )
     raise SystemExit(1)
+
+
+def _get_trading_provider_from_settings() -> Optional['TradingProvider']:
+    """
+    Create a trading provider based on gui_settings.json or environment variables.
+    Falls back to Robinhood if not specified or on error.
+    """
+    if not HAS_API_PROVIDERS:
+        return None
+    
+    # Default to Robinhood
+    provider_name = "robinhood"
+    
+    # Try to read from gui_settings.json
+    try:
+        if os.path.isfile(_GUI_SETTINGS_PATH):
+            with open(_GUI_SETTINGS_PATH, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+                # Check enabled platforms and pick the first enabled trading provider
+                enabled_platforms = settings.get("enabled_platforms", {})
+                trading_providers = ["robinhood", "binance", "binance_us", "coinbase"]
+                for provider in trading_providers:
+                    if enabled_platforms.get(provider, False):
+                        provider_name = provider
+                        break
+    except Exception:
+        pass
+    
+    # Also check environment variable
+    provider_name = os.environ.get("TRADING_PROVIDER", provider_name).strip().lower()
+    
+    # Create provider based on name
+    try:
+        if provider_name == "robinhood":
+            api_key = _get_api_key("robinhood", "api_key")
+            private_key = _get_api_key("robinhood", "private_key")
+            if not api_key or not private_key:
+                print("[TRADER] Robinhood credentials not found in encrypted storage.")
+                return None
+            return create_trading_provider(
+                "robinhood",
+                api_key=api_key,
+                private_key=private_key
+            )
+        elif provider_name in ["binance", "binance_us"]:
+            api_key = _get_api_key("binance", "api_key") or _get_api_key("binance_us", "api_key")
+            api_secret = _get_api_key("binance", "api_secret") or _get_api_key("binance_us", "api_secret")
+            if not api_key or not api_secret:
+                print(f"[TRADER] {provider_name} credentials not found in encrypted storage.")
+                return None
+            
+            use_us = (provider_name == "binance_us")
+            return create_trading_provider(
+                "binance",
+                api_key=api_key,
+                api_secret=api_secret,
+                use_us=use_us
+            )
+        elif provider_name == "coinbase":
+            api_key = _get_api_key("coinbase", "api_key")
+            api_secret = _get_api_key("coinbase", "api_secret")
+            if not api_key or not api_secret:
+                print("[TRADER] Coinbase credentials not found in encrypted storage.")
+                return None
+            return create_trading_provider(
+                "coinbase",
+                api_key=api_key,
+                api_secret=api_secret
+            )
+        else:
+            print(f"[TRADER] Unknown trading provider: {provider_name}")
+            return None
+    except Exception as e:
+        print(f"[TRADER] Failed to create {provider_name} provider: {e}")
+        return None
+
 
 class CryptoAPITrading:
     def __init__(self):
         # keep a copy of the folder map (same idea as trader.py)
         self.path_map = dict(base_paths)
 
+        # Try to use the new abstraction layer
+        self.trading_provider = _get_trading_provider_from_settings() if HAS_API_PROVIDERS else None
+        
+        # Keep original Robinhood implementation for backward compatibility
         self.api_key = API_KEY
         # Robustly decode the base64 private key: strip whitespace and fix padding
         _b64 = (BASE64_PRIVATE_KEY or "").strip()
@@ -197,6 +330,13 @@ class CryptoAPITrading:
             raise
         self.private_key = SigningKey(private_key_seed)
         self.base_url = "https://trading.robinhood.com"
+        
+        # Log which provider we're using
+        if self.trading_provider:
+            provider_class = self.trading_provider.__class__.__name__
+            print(f"[TRADER] Using trading provider: {provider_class}")
+        else:
+            print("[TRADER] Using legacy Robinhood implementation")
 
         self.dca_levels_triggered = {}  # Track DCA levels for each crypto
         self.dca_levels = [-2.5, -5.0, -10.0, -20.0, -30.0, -40.0, -50.0]  # Moved to instance variable
@@ -410,8 +550,6 @@ class CryptoAPITrading:
           N1 = 1st blue line (top)
           ...
           N7 = 7th blue line (bottom)
-          
-        Filters levels based on neural_levels_min and neural_levels_max from settings.
         """
         sym = str(symbol).upper().strip()
         folder = base_paths.get(sym, main_dir if sym == "BTC" else os.path.join(main_dir, sym))
@@ -445,20 +583,6 @@ class CryptoAPITrading:
                 seen.add(k)
                 out.append(float(v))
             out.sort(reverse=True)
-            
-            # Apply neural levels range filter from settings
-            try:
-                settings_path = os.path.join(os.path.dirname(__file__), "gui_settings.json")
-                if os.path.isfile(settings_path):
-                    with open(settings_path, "r", encoding="utf-8") as f:
-                        settings = json.load(f) or {}
-                    min_level = max(0, int(settings.get("neural_levels_min", 0)))
-                    max_level = min(len(out) - 1, int(settings.get("neural_levels_max", 7)))
-                    if min_level <= max_level and max_level < len(out):
-                        out = out[min_level:max_level + 1]
-            except Exception:
-                pass
-            
             return out
         except Exception:
             return []
@@ -961,26 +1085,9 @@ class CryptoAPITrading:
         # Calculate total account value (robust: never drop a held coin to $0 on transient API misses)
         snapshot_ok = True
 
-        # buying power - try multiple field names for Robinhood API compatibility
+        # buying power
         try:
-            # Try common field names
-            buying_power = None
-            if isinstance(account, dict):
-                # Check if response has results array
-                if "results" in account and isinstance(account["results"], list) and len(account["results"]) > 0:
-                    acct_data = account["results"][0]
-                else:
-                    acct_data = account
-                
-                # Try various field names
-                for field in ["buying_power", "cash", "cash_balance", "available_cash", "buying_power_amount"]:
-                    if field in acct_data and acct_data[field] is not None:
-                        buying_power = float(acct_data[field])
-                        break
-            
-            if buying_power is None:
-                buying_power = 0.0
-                snapshot_ok = False
+            buying_power = float(account.get("buying_power", 0))
         except Exception:
             buying_power = 0.0
             snapshot_ok = False

@@ -17,6 +17,66 @@ import json
 import uuid
 
 from nacl.signing import SigningKey
+from cryptography.fernet import Fernet
+
+# Import API abstraction layer
+try:
+	from api_providers import (
+		create_market_data_provider,
+		MarketDataProvider
+	)
+	HAS_API_PROVIDERS = True
+except ImportError:
+	HAS_API_PROVIDERS = False
+
+# -----------------------------
+# Encrypted API Keys Management
+# -----------------------------
+API_KEYS_FILE = "api_keys.enc"
+MASTER_KEY_FILE = "master_key.txt"
+
+def _generate_master_key() -> str:
+    """Generate a new master key for encryption."""
+    return base64.urlsafe_b64encode(os.urandom(32)).decode()
+
+def _get_master_key() -> str:
+    """Get or create the master key."""
+    key_path = os.path.join(os.path.dirname(__file__), MASTER_KEY_FILE)
+    if os.path.exists(key_path):
+        with open(key_path, 'r') as f:
+            return f.read().strip()
+    else:
+        key = _generate_master_key()
+        with open(key_path, 'w') as f:
+            f.write(key)
+        # Make the master key file readable only by owner
+        os.chmod(key_path, 0o600)
+        return key
+
+def _get_cipher() -> "Fernet":
+    """Get the Fernet cipher for encryption/decryption."""
+    master_key = _get_master_key()
+    return Fernet(master_key.encode())
+
+def _load_encrypted_api_keys() -> dict:
+    """Load encrypted API keys from file."""
+    keys_file = os.path.join(os.path.dirname(__file__), API_KEYS_FILE)
+    if not os.path.exists(keys_file):
+        return {}
+    
+    try:
+        cipher = _get_cipher()
+        with open(keys_file, 'rb') as f:
+            encrypted_data = f.read()
+        decrypted_data = cipher.decrypt(encrypted_data)
+        return json.loads(decrypted_data.decode())
+    except Exception:
+        return {}
+
+def _get_api_key(provider: str, key_type: str) -> str:
+    """Get a specific API key for a provider."""
+    keys = _load_encrypted_api_keys()
+    return keys.get(provider, {}).get(key_type, "")
 
 # Feature flag: allow the caller (GUI) to disable KuCoin usage.
 USE_KUCOIN = os.environ.get("USE_KUCOIN_API", "1").strip().lower() not in ("0", "false", "no")
@@ -32,12 +92,69 @@ if USE_KUCOIN:
 	except Exception:
 		market = None
 
+# Initialize market data provider from settings or environment
+_market_data_provider = None
+
+def _get_market_data_provider() -> 'MarketDataProvider':
+	"""Get the configured market data provider."""
+	global _market_data_provider
+	
+	if _market_data_provider is not None:
+		return _market_data_provider
+	
+	if not HAS_API_PROVIDERS:
+		return None
+	
+	# Default to KuCoin
+	provider_name = "kucoin"
+	
+	# Try to read from gui_settings.json and check enabled platforms
+	try:
+		settings_path = os.path.join(os.path.dirname(__file__), "gui_settings.json")
+		if os.path.isfile(settings_path):
+			with open(settings_path, "r", encoding="utf-8") as f:
+				settings = json.load(f)
+				enabled_platforms = settings.get("enabled_platforms", {})
+				# Pick the first enabled market data provider
+				market_providers = ["kucoin", "binance", "binance_us", "coinbase", "coingecko"]
+				for provider in market_providers:
+					if enabled_platforms.get(provider, False):
+						provider_name = provider
+						break
+	except Exception:
+		pass
+	
+	# Also check environment variable
+	provider_name = os.environ.get("MARKET_DATA_PROVIDER", provider_name).strip().lower()
+	
+	try:
+		_market_data_provider = create_market_data_provider(provider_name)
+	except Exception:
+		# Fallback to KuCoin
+		try:
+			_market_data_provider = create_market_data_provider("kucoin")
+		except Exception:
+			_market_data_provider = None
+	
+	return _market_data_provider
+
 
 def get_klines(coin: str, tf_type: str):
 	"""Return klines for `coin` and timeframe `tf_type`.
-	If a kucoin `Market` client is available use it, otherwise call the
-	public REST API via `requests` and return the raw data list.
+	First tries the configured market data provider from api_providers.py,
+	then falls back to KuCoin (kucoin-python client or REST API).
 	"""
+	# Try new API abstraction layer first
+	provider = _get_market_data_provider()
+	if provider is not None:
+		try:
+			klines = provider.get_klines(coin, tf_type)
+			if klines:
+				return klines
+		except Exception:
+			pass
+	
+	# Fallback to original KuCoin implementation
 	if market is not None:
 		try:
 			return market.get_kline(coin, tf_type)
@@ -127,27 +244,20 @@ class RobinhoodMarketData:
 def robinhood_current_ask(symbol: str) -> float:
     """
     Returns Robinhood current BUY price (ask_inclusive_of_buy_spread) for symbols like 'BTC-USD'.
-    Reads creds from r_key.txt and r_secret.txt in the same folder as this script.
+    Reads creds from encrypted storage.
     """
     global _RH_MD
     if _RH_MD is None:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        key_path = os.path.join(base_dir, "r_key.txt")
-        secret_path = os.path.join(base_dir, "r_secret.txt")
+        api_key = _get_api_key("robinhood", "api_key")
+        private_key_b64 = _get_api_key("robinhood", "private_key")
 
-        if not os.path.isfile(key_path) or not os.path.isfile(secret_path):
+        if not api_key or not private_key_b64:
             raise RuntimeError(
-                "Missing r_key.txt and/or r_secret.txt next to pt_thinker.py. "
-                "Run pt_trader.py once to create them (and to set your Robinhood API key)."
+                "Robinhood API credentials not found in encrypted storage. "
+                "Use the GUI Settings → Setup Wizards → Setup Robinhood to configure."
             )
 
-
-        with open(key_path, "r", encoding="utf-8") as f:
-            api_key = f.read()
-        with open(secret_path, "r", encoding="utf-8") as f:
-            priv_b64 = f.read()
-
-        _RH_MD = RobinhoodMarketData(api_key=api_key, base64_private_key=priv_b64)
+        _RH_MD = RobinhoodMarketData(api_key=api_key, base64_private_key=private_key_b64)
 
     return _RH_MD.get_current_ask(symbol)
 
@@ -308,24 +418,7 @@ for _sym in CURRENT_COINS:
 
 
 distance = 0.5
-
-# Load neural timeframes from GUI settings
-def _load_neural_timeframes() -> list:
-	"""Returns the list of selected neural timeframes from gui_settings.json"""
-	try:
-		if os.path.isfile(_GUI_SETTINGS_PATH):
-			with open(_GUI_SETTINGS_PATH, "r", encoding="utf-8") as f:
-				data = json.load(f) or {}
-			tfs = data.get("neural_timeframes", None)
-			if isinstance(tfs, list) and tfs:
-				return [str(tf).strip() for tf in tfs if str(tf).strip()]
-	except Exception:
-		pass
-	# Fallback default
-	return ['1hour', '2hour', '4hour', '8hour', '12hour', '1day', '1week']
-
-# Active neural timeframes loaded from settings
-tf_choices = _load_neural_timeframes()
+tf_choices = ['1hour', '2hour', '4hour', '8hour', '12hour', '1day', '1week']
 
 def new_coin_state():
 	return {
@@ -383,21 +476,10 @@ def _sync_coins_from_settings():
 
 	- Adds new coins: creates folder + init_coin() + starts stepping them
 	- Removes coins: stops stepping them (leaves state on disk untouched)
-	- Updates neural_timeframes: reloads tf_choices list
 	"""
-	global CURRENT_COINS, tf_choices
+	global CURRENT_COINS
 
 	new_list = _load_gui_coins()
-	
-	# Check if neural timeframes changed
-	new_tfs = _load_neural_timeframes()
-	if new_tfs != tf_choices:
-		tf_choices = new_tfs
-		# Reset states for all coins when timeframes change so arrays stay consistent
-		for sym in list(states.keys()):
-			states[sym] = new_coin_state()
-		print(f"Neural timeframes updated to: {tf_choices}")
-	
 	if new_list == CURRENT_COINS:
 		return
 

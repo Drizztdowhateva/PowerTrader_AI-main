@@ -1,87 +1,12 @@
-try:
-    from kucoin.client import Market
-    market = Market(url='https://api.kucoin.com')
-    USE_KUCOIN_API = True
-except ImportError:
-    market = None
-    USE_KUCOIN_API = False
-    print("Warning: kucoin-python not installed. Using REST API fallback.")
-
+from kucoin.client import Market
+market = Market(url='https://api.kucoin.com')
 import time
-import requests
 """
 <------------
 newest oldest
 ------------>
 oldest newest
 """
-
-# REST API fallback functions for when kucoin-python is not available
-def get_kline_rest(symbol, timeframe, startAt, endAt):
-    """Fetch klines from KuCoin REST API."""
-    try:
-        url = f"https://api.kucoin.com/api/v1/market/candles"
-        params = {
-            "symbol": symbol,
-            "type": timeframe,
-            "startAt": startAt,
-            "endAt": endAt
-        }
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("code") == "200000" and data.get("data"):
-            return data["data"]
-        return []
-    except Exception as e:
-        print(f"Error fetching klines from REST API: {e}")
-        return []
-
-def get_ticker_rest(symbol):
-    """Fetch ticker from KuCoin REST API."""
-    try:
-        url = f"https://api.kucoin.com/api/v1/market/orderbook/level1"
-        params = {"symbol": symbol}
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("code") == "200000" and data.get("data"):
-            ticker = data["data"]
-            return {
-                "price": float(ticker.get("price", 0))
-            }
-        return {"price": 0}
-    except Exception as e:
-        print(f"Error fetching ticker from REST API: {e}")
-        return {"price": 0}
-
-# Wrapper class to handle both SDK and REST API
-class KuCoinMarket:
-    def __init__(self, sdk_market=None):
-        self.sdk = sdk_market
-    
-    def get_kline(self, symbol, timeframe, startAt, endAt):
-        if self.sdk and USE_KUCOIN_API:
-            try:
-                return self.sdk.get_kline(symbol, timeframe, startAt=startAt, endAt=endAt)
-            except Exception:
-                pass
-        return get_kline_rest(symbol, timeframe, startAt, endAt)
-    
-    def get_ticker(self, symbol):
-        if self.sdk and USE_KUCOIN_API:
-            try:
-                return self.sdk.get_ticker(symbol)
-            except Exception:
-                pass
-        return get_ticker_rest(symbol)
-
-# Use wrapper for market access
-if market is None:
-    market = KuCoinMarket(None)
-else:
-    market = KuCoinMarket(market)
-
 avg50 = []
 import sys
 import datetime
@@ -266,40 +191,6 @@ def write_threshold_sometimes(tf_choice, perfect_threshold, loop_i, every=200):
 	except:
 		pass
 
-def write_training_progress(coin, started_at, loop_i, max_iterations, every=50):
-	"""Write training progress percentage to trainer_status.json frequently."""
-	if loop_i % every != 0:
-		return
-	try:
-		# Cap at 99% until actually finished (100% only when state=FINISHED)
-		if max_iterations > 0:
-			progress_pct = min(99, int((loop_i / max_iterations) * 100))
-		else:
-			# Fallback: show progress based on iteration count
-			progress_pct = min(99, min(int(loop_i / 100), 99))
-		
-		data = {
-			"coin": coin,
-			"state": "TRAINING",
-			"started_at": started_at,
-			"timestamp": int(time.time()),
-			"progress_pct": progress_pct,
-			"loop_i": loop_i,
-		}
-		
-		# Atomic write to prevent corruption
-		tmp_path = "trainer_status.json.tmp"
-		with open(tmp_path, "w", encoding="utf-8") as f:
-			json.dump(data, f)
-			f.flush()
-			os.fsync(f.fileno())
-		
-		# Atomic rename
-		import shutil
-		shutil.move(tmp_path, "trainer_status.json")
-	except Exception as e:
-		pass
-
 def should_stop_training(loop_i, every=50):
 	"""Check killer.txt less often (still responsive, way less IO)."""
 	if loop_i % every != 0:
@@ -345,8 +236,8 @@ try:
 		pass
 except:
 	restarted_yet = 0
-tf_choices = ['1min', '5min', '15min', '30min', '1hour', '2hour', '4hour', '8hour', '12hour', '1day', '1week']
-tf_minutes = [1, 5, 15, 30, 60, 120, 240, 480, 720, 1440, 10080]
+tf_choices = ['1hour', '2hour', '4hour', '8hour', '12hour', '1day', '1week']
+tf_minutes = [60, 120, 240, 480, 720, 1440, 10080]
 # --- GUI HUB INPUT (NO PROMPTS) ---
 # Usage: python pt_trainer.py BTC [reprocess_yes|reprocess_no]
 _arg_coin = "BTC"
@@ -363,7 +254,6 @@ restart_processing = "yes"
 
 # GUI reads this status file to know if this coin is TRAINING or FINISHED
 _trainer_started_at = int(time.time())
-_max_training_iterations = 10000  # Estimated max iterations for progress calculation
 try:
 	with open("trainer_status.json", "w", encoding="utf-8") as f:
 		json.dump(
@@ -372,17 +262,12 @@ try:
 				"state": "TRAINING",
 				"started_at": _trainer_started_at,
 				"timestamp": _trainer_started_at,
-				"progress_pct": 0,
-				"loop_i": 0,
 			},
 			f,
 		)
-		f.flush()
-		os.fsync(f.fileno())
 except Exception:
 	pass
 
-print(f"Training {_arg_coin} - progress will be written to trainer_status.json")
 
 the_big_index = 0
 while True:
@@ -622,8 +507,6 @@ while True:
 	while True:
 		while True:
 			loop_i += 1
-			# Update training progress for GUI (every 50 iterations)
-			write_training_progress(_arg_coin, _trainer_started_at, loop_i, _max_training_iterations, every=50)
 			matched_patterns_count = 0
 			list_of_ys = []
 			list_of_ys_count = 0
@@ -911,6 +794,7 @@ while True:
 								)
 						except Exception:
 							pass
+
 							os._exit(0)
 					else:
 						the_big_index = 0
@@ -1236,7 +1120,7 @@ while True:
 						number_of_candles_index += 1
 						if number_of_candles_index >= len(number_of_candles):
 							print("Processed all number_of_candles. Exiting.")
-							sys.exit(0)
+							os._exit(0)
 					perfect_yes = 'no'
 					if 1==1:
 						high_current_price = high_current_pattern[len(high_current_pattern)-1]
@@ -1542,7 +1426,7 @@ while True:
 												except Exception:
 													pass
 
-												sys.exit(0)
+												os._exit(0)
 											else:
 												the_big_index = 0
 										else:

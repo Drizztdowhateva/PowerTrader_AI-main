@@ -1,87 +1,10 @@
-try:
-    from kucoin.client import Market
-    market = Market(url='https://api.kucoin.com')
-    USE_KUCOIN_API = True
-except ImportError:
-    market = None
-    USE_KUCOIN_API = False
-    print("Warning: kucoin-python not installed. Using REST API fallback.")
-
 import time
-import requests
 """
 <------------
 newest oldest
 ------------>
 oldest newest
 """
-
-# REST API fallback functions for when kucoin-python is not available
-def get_kline_rest(symbol, timeframe, startAt, endAt):
-    """Fetch klines from KuCoin REST API."""
-    try:
-        url = f"https://api.kucoin.com/api/v1/market/candles"
-        params = {
-            "symbol": symbol,
-            "type": timeframe,
-            "startAt": startAt,
-            "endAt": endAt
-        }
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("code") == "200000" and data.get("data"):
-            return data["data"]
-        return []
-    except Exception as e:
-        print(f"Error fetching klines from REST API: {e}")
-        return []
-
-def get_ticker_rest(symbol):
-    """Fetch ticker from KuCoin REST API."""
-    try:
-        url = f"https://api.kucoin.com/api/v1/market/orderbook/level1"
-        params = {"symbol": symbol}
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("code") == "200000" and data.get("data"):
-            ticker = data["data"]
-            return {
-                "price": float(ticker.get("price", 0))
-            }
-        return {"price": 0}
-    except Exception as e:
-        print(f"Error fetching ticker from REST API: {e}")
-        return {"price": 0}
-
-# Wrapper class to handle both SDK and REST API
-class KuCoinMarket:
-    def __init__(self, sdk_market=None):
-        self.sdk = sdk_market
-    
-    def get_kline(self, symbol, timeframe, startAt, endAt):
-        if self.sdk and USE_KUCOIN_API:
-            try:
-                return self.sdk.get_kline(symbol, timeframe, startAt=startAt, endAt=endAt)
-            except Exception:
-                pass
-        return get_kline_rest(symbol, timeframe, startAt, endAt)
-    
-    def get_ticker(self, symbol):
-        if self.sdk and USE_KUCOIN_API:
-            try:
-                return self.sdk.get_ticker(symbol)
-            except Exception:
-                pass
-        return get_ticker_rest(symbol)
-
-# Use wrapper for market access
-if market is None:
-    market = KuCoinMarket(None)
-else:
-    market = KuCoinMarket(market)
-
 avg50 = []
 import sys
 import datetime
@@ -103,6 +26,108 @@ in_trade = 'no'
 updowncount = 0
 updowncount1 = 0
 updowncount1_2 = 0
+import requests
+import json
+import os
+
+# Check enabled platforms
+settings_path = os.path.join(os.path.dirname(__file__), 'gui_settings.json')
+try:
+    with open(settings_path, 'r') as f:
+        settings = json.load(f)
+    enabled_platforms = settings.get('enabled_platforms', {})
+except:
+    enabled_platforms = {}
+
+# Get platform from env or find first enabled
+platform = os.environ.get('POWERTRADER_MARKET_PLATFORM')
+if not platform:
+    for p in ['kucoin', 'binance', 'binance_us', 'coinbase']:
+        if enabled_platforms.get(p, False):
+            platform = p
+            break
+
+if not platform:
+    print("No market data platform enabled in settings. Training requires market data. Exiting.")
+    sys.exit(1)
+
+print(f"Using platform: {platform}")
+
+# Functions to get market data via REST
+def get_klines(symbol, timeframe, startAt=None, endAt=None, limit=100):
+    if platform == 'kucoin':
+        url = "https://api.kucoin.com/api/v1/market/candles"
+        params = {"symbol": f"{symbol}-USDT", "type": timeframe}
+        if startAt:
+            params["startAt"] = startAt
+        if endAt:
+            params["endAt"] = endAt
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()["data"]
+        # KuCoin returns newest to oldest, reverse to oldest to newest
+        return data[::-1]
+    elif platform in ['binance', 'binance_us']:
+        base_url = "https://api.binance.com/api/v3/klines" if platform == 'binance' else "https://api.binance.us/api/v3/klines"
+        # Map timeframe to binance interval
+        interval = timeframe.replace('hour', 'h').replace('min', 'm').replace('day', 'd').replace('week', 'w')
+        params = {"symbol": f"{symbol}USDT", "interval": interval, "limit": limit}
+        if startAt:
+            params["startTime"] = startAt * 1000
+        if endAt:
+            params["endTime"] = endAt * 1000
+        resp = requests.get(base_url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        # Convert to KuCoin format: [ts, open, close, high, low, volume, turnover]
+        return [[int(k[0]/1000), k[1], k[4], k[2], k[3], k[5], k[7]] for k in data]
+    elif platform == 'coinbase':
+        url = f"https://api.exchange.coinbase.com/products/{symbol}-USD/candles"
+        params = {"granularity": timeframe_seconds(timeframe)}
+        if startAt:
+            params["start"] = startAt
+        if endAt:
+            params["end"] = endAt
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        # Coinbase format: [time, low, high, open, close, volume]
+        return [[k[0], k[3], k[4], k[2], k[1], k[5], 0] for k in data]  # turnover 0
+    else:
+        raise ValueError(f"Unsupported platform: {platform}")
+
+def timeframe_seconds(tf):
+    # For coinbase granularity
+    mapping = {
+        "1min": 60, "5min": 300, "15min": 900, "30min": 1800,
+        "1hour": 3600, "2hour": 7200, "4hour": 14400, "8hour": 28800, "12hour": 43200,
+        "1day": 86400, "1week": 604800
+    }
+    return mapping.get(tf, 3600)
+
+def get_ticker(symbol):
+    if platform == 'kucoin':
+        url = f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={symbol}-USDT"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()["data"]
+        return data
+    elif platform in ['binance', 'binance_us']:
+        base_url = "https://api.binance.com/api/v3/ticker/price" if platform == 'binance' else "https://api.binance.us/api/v3/ticker/price"
+        params = {"symbol": f"{symbol}USDT"}
+        resp = requests.get(base_url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        # Convert to dict like kucoin
+        return {"price": data["price"], "symbol": data["symbol"]}
+    elif platform == 'coinbase':
+        url = f"https://api.coinbase.com/v2/prices/{symbol}-USD/spot"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()["data"]
+        return {"price": data["amount"], "symbol": f"{symbol}-USD"}
+    else:
+        raise ValueError(f"Unsupported platform: {platform}")
 updowncount1_3 = 0
 updowncount1_4 = 0
 high_var2 = 0.0
@@ -266,40 +291,6 @@ def write_threshold_sometimes(tf_choice, perfect_threshold, loop_i, every=200):
 	except:
 		pass
 
-def write_training_progress(coin, started_at, loop_i, max_iterations, every=50):
-	"""Write training progress percentage to trainer_status.json frequently."""
-	if loop_i % every != 0:
-		return
-	try:
-		# Cap at 99% until actually finished (100% only when state=FINISHED)
-		if max_iterations > 0:
-			progress_pct = min(99, int((loop_i / max_iterations) * 100))
-		else:
-			# Fallback: show progress based on iteration count
-			progress_pct = min(99, min(int(loop_i / 100), 99))
-		
-		data = {
-			"coin": coin,
-			"state": "TRAINING",
-			"started_at": started_at,
-			"timestamp": int(time.time()),
-			"progress_pct": progress_pct,
-			"loop_i": loop_i,
-		}
-		
-		# Atomic write to prevent corruption
-		tmp_path = "trainer_status.json.tmp"
-		with open(tmp_path, "w", encoding="utf-8") as f:
-			json.dump(data, f)
-			f.flush()
-			os.fsync(f.fileno())
-		
-		# Atomic rename
-		import shutil
-		shutil.move(tmp_path, "trainer_status.json")
-	except Exception as e:
-		pass
-
 def should_stop_training(loop_i, every=50):
 	"""Check killer.txt less often (still responsive, way less IO)."""
 	if loop_i % every != 0:
@@ -345,8 +336,8 @@ try:
 		pass
 except:
 	restarted_yet = 0
-tf_choices = ['1min', '5min', '15min', '30min', '1hour', '2hour', '4hour', '8hour', '12hour', '1day', '1week']
-tf_minutes = [1, 5, 15, 30, 60, 120, 240, 480, 720, 1440, 10080]
+tf_choices = ['1hour', '2hour', '4hour', '8hour', '12hour', '1day', '1week']
+tf_minutes = [60, 120, 240, 480, 720, 1440, 10080]
 # --- GUI HUB INPUT (NO PROMPTS) ---
 # Usage: python pt_trainer.py BTC [reprocess_yes|reprocess_no]
 _arg_coin = "BTC"
@@ -363,7 +354,6 @@ restart_processing = "yes"
 
 # GUI reads this status file to know if this coin is TRAINING or FINISHED
 _trainer_started_at = int(time.time())
-_max_training_iterations = 10000  # Estimated max iterations for progress calculation
 try:
 	with open("trainer_status.json", "w", encoding="utf-8") as f:
 		json.dump(
@@ -372,17 +362,12 @@ try:
 				"state": "TRAINING",
 				"started_at": _trainer_started_at,
 				"timestamp": _trainer_started_at,
-				"progress_pct": 0,
-				"loop_i": 0,
 			},
 			f,
 		)
-		f.flush()
-		os.fsync(f.fileno())
 except Exception:
 	pass
 
-print(f"Training {_arg_coin} - progress will be written to trainer_status.json")
 
 the_big_index = 0
 while True:
@@ -521,7 +506,7 @@ while True:
 	while True:
 		time.sleep(.5)
 		try:
-			history = str(market.get_kline(coin_choice,timeframe,startAt=end_time,endAt=start_time)).replace(']]','], ').replace('[[','[').split('], [')
+			history = str(get_klines(coin_choice,timeframe,startAt=end_time,endAt=start_time)).replace(']]','], ').replace('[[','[').split('], [')
 		except Exception as e:
 			PrintException()
 			time.sleep(3.5)
@@ -607,7 +592,7 @@ while True:
 		price_list.reverse()
 		high_price_list.reverse()
 		low_price_list.reverse()
-		ticker_data = str(market.get_ticker(coin_choice)).replace('"','').replace("'","").replace("[","").replace("{","").replace("]","").replace("}","").replace(",","").lower().split(' ')
+		ticker_data = str(get_ticker(coin_choice)).replace('"','').replace("'","").replace("[","").replace("{","").replace("]","").replace("}","").replace(",","").lower().split(' ')
 		price = float(ticker_data[ticker_data.index('price:')+1])
 	except:
 		PrintException()
@@ -622,8 +607,6 @@ while True:
 	while True:
 		while True:
 			loop_i += 1
-			# Update training progress for GUI (every 50 iterations)
-			write_training_progress(_arg_coin, _trainer_started_at, loop_i, _max_training_iterations, every=50)
 			matched_patterns_count = 0
 			list_of_ys = []
 			list_of_ys_count = 0

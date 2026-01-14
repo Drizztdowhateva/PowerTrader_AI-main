@@ -1,0 +1,19 @@
+{
+  "coins": ["BTC", "ETH", "XRP", "BNB", "DOGE"],
+  "main_neural_dir": "",
+  
+  "_comment_market_data": "Market data provider for historical candles and price data",
+  "market_data_provider": "kucoin",
+  
+  "_comment_trading": "Trading provider for order execution",
+  "trading_provider": "robinhood",
+  
+  "_comment_providers": "Available providers: market_data: kucoin, binance, binance_us, coinbase, coingecko | trading: robinhood, binance, binance_us, coinbase",
+  
+  "_comment_binance": "For Binance, set environment variables: BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_USE_US=true/false",
+  "_comment_coinbase": "For Coinbase, set environment variables: COINBASE_API_KEY, COINBASE_API_SECRET",
+  
+  "runner_script": "",
+  "trainer_script": "",
+  "trader_script": ""
+}

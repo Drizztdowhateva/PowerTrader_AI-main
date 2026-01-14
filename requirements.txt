@@ -5,3 +5,8 @@ colorama
 cryptography
 PyNaCl
 kucoin-python
+
+# Optional: Additional exchange API clients
+# Uncomment the ones you want to use
+# python-binance  # For Binance trading
+# coinbase-advanced-py  # For Coinbase Advanced Trade API

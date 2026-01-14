@@ -1,1 +1,1 @@
-{"coin": "DOGE", "state": "TRAINING", "started_at": 1767983056, "timestamp": 1767983144, "progress_pct": 53, "loop_i": 5350}
+{"state": "STOPPED", "pid": 966860, "stop_time": "2026-01-08T15:17:41.085106Z"}
